@@ -1,0 +1,3 @@
+﻿leftover_t=0
+reports=False
+debug=False

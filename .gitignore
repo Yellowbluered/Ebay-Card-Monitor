@@ -1,0 +1,36 @@
+# ── 依賴 ──────────────────────────────────────────────────────
+node_modules/
+
+# ── 環境變數（內含 eBay 憑證，絕對不可提交）──────────────────
+.env
+.env.local
+.env.*.local
+
+# ── 程式產出的報告 ────────────────────────────────────────────
+out/
+reports/
+*.csv
+*-report.json
+result*.json
+listings*.json
+deals*.json
+
+# ── 除錯暫存 ──────────────────────────────────────────────────
+_debug/
+_probe*
+*.log
+
+# ── Playwright ────────────────────────────────────────────────
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+pw-browsers/
+
+# ── 編輯器 / 作業系統 ─────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+

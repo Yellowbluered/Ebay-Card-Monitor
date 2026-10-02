@@ -1,0 +1,40 @@
+{
+  "name": "ebay-card-price-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "eBay 卡牌（球卡 / 集換式卡牌）價格掃描器：抓取『仍在售（未售出）』的卡、計算平均價，列出低於或等於平均價的甜甜價，附標題、價格、折扣與連結。",
+  "main": "src/index.js",
+  "bin": {
+    "ebay-card-scan": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "demo": "node src/index.js --demo",
+    "scan": "node src/index.js",
+    "scrape": "node src/index.js --source scrape",
+    "scrape:playwright": "node src/index.js --source scrape --engine playwright",
+    "scrape:puppeteer": "node src/index.js --source scrape --engine puppeteer",
+    "install-browser": "npx puppeteer browsers install chrome",
+    "install-browser:playwright": "npx playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ebay",
+    "browse-api",
+    "playwright",
+    "puppeteer",
+    "scraper",
+    "trading-cards",
+    "sports-cards",
+    "price-scanner"
+  ],
+  "license": "MIT",
+  "optionalDependencies": {
+    "playwright": "^1.63.0",
+    "puppeteer": "23.11.1",
+    "puppeteer-extra": "3.3.6",
+    "puppeteer-extra-plugin-stealth": "2.11.2"
+  }
+}

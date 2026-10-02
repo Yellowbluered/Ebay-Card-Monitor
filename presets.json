@@ -1,0 +1,51 @@
+{
+  "_comment": "預設別名：node src/index.js @pokemon 即可展開成完整查詢。欄位皆選填；命令列參數優先於這裡的設定。可用 --list-presets 查看。",
+  "pokemon": {
+    "query": "pokemon tcg",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk", "proxy", "custom"],
+    "note": "寶可夢 TCG（可再加卡名，例：@pokemon charizard psa 10）"
+  },
+  "onepiece": {
+    "query": "one piece card game",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk"],
+    "note": "航海王卡牌（例：@onepiece luffy psa 10）"
+  },
+  "dragonball": {
+    "query": "dragon ball super card game",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk"],
+    "note": "龍珠超卡牌（例：@dragonball goku）"
+  },
+  "yugioh": {
+    "query": "yugioh",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk", "proxy"],
+    "note": "遊戲王（例：@yugioh blue eyes white dragon）"
+  },
+  "lorcana": {
+    "query": "disney lorcana",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk"],
+    "note": "Disney Lorcana（例：@lorcana elsa）"
+  },
+  "mtg": {
+    "query": "magic the gathering",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk", "proxy"],
+    "note": "魔法風雲會（例：@mtg black lotus）"
+  },
+  "nba": {
+    "query": "basketball cards",
+    "minPrice": 5,
+    "exclude": ["reprint", "custom"],
+    "note": "籃球卡（例：@nba michael jordan psa 10）"
+  },
+  "pokemon151": {
+    "query": "pokemon 151",
+    "minPrice": 5,
+    "exclude": ["sleeve", "box", "lot", "bulk"],
+    "note": "寶可夢 151（例：@pokemon151 charizard）"
+  }
+}
