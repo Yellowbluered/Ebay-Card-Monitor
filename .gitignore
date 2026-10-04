@@ -34,3 +34,7 @@ pw-browsers/
 Thumbs.db
 Desktop.ini
 
+# ── 本機除錯／暫存檔 ─────────────────────────────────────────
+_cli_*.txt
+/English App
+

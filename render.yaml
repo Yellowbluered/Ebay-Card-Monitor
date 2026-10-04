@@ -1,0 +1,37 @@
+# ============================================================
+# Render Blueprint 設定檔（render.yaml）
+# ------------------------------------------------------------
+# 重要：Render 免費方案「只支援 Web Service」，不支援
+# Background Worker，所以本 Bot 以 Web Service 形式部署，
+# 並在 src/discordBot.js 內建一個 PORT 健康檢查伺服器。
+# ============================================================
+services:
+  - type: web
+    name: ebay-card-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /
+    envVars:
+      # ── eBay Browse API 憑證（必要）────────────────────────
+      # sync: false = 不會寫死喺檔案；部署時 Render 會喺網頁提示你填入
+      - key: EBAY_CLIENT_ID
+        sync: false
+      - key: EBAY_CLIENT_SECRET
+        sync: false
+      # ── eBay 市場設定 ──────────────────────────────────────
+      - key: EBAY_ENV
+        value: production
+      - key: EBAY_MARKETPLACE
+        value: EBAY_US
+      # ── Discord Bot 設定 ───────────────────────────────────
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_CHANNEL_ID
+        sync: false
+      - key: DISCORD_POLL_INTERVAL_MIN
+        value: "30"
+      - key: DISCORD_MIN_DISCOUNT
+        value: "0"

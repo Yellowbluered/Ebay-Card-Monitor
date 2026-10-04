@@ -1,5 +1,6 @@
 {
   "_comment": "預設別名：node src/index.js @pokemon 即可展開成完整查詢。欄位皆選填；命令列參數優先於這裡的設定。可用 --list-presets 查看。",
+  "_watchlist": [],
   "pokemon": {
     "query": "pokemon tcg",
     "minPrice": 5,

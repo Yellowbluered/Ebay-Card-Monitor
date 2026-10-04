@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "bot": "node src/discordBot.js",
     "demo": "node src/index.js --demo",
     "scan": "node src/index.js",
     "scrape": "node src/index.js --source scrape",
@@ -36,5 +37,8 @@
     "puppeteer": "23.11.1",
     "puppeteer-extra": "3.3.6",
     "puppeteer-extra-plugin-stealth": "2.11.2"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0"
   }
 }

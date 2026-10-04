@@ -343,3 +343,79 @@ run.cmd "charizard psa 10" --source scrape --sold-ref --sold-vs 10 --sold-pages 
 ...
 14  Pokemon Base Set Charizard Holo PSA 10 #4/102 Gem        $215.00   -1.5%     -$3.22        https://www.ebay.com/itm/1100000014
 ```
+
+---
+
+## Discord Bot：甜甜價推播 + 雙向指令
+
+本專案可加上一個 **Discord Bot**，讓你在手機 / 電腦上直接下指令查價，並在背景自動推播「甜甜價」通知。
+
+### 設定
+
+1. 安裝依賴（已內含 `discord.js`）：
+
+   ```bash
+   npm install
+   ```
+
+2. 在 `.env` 加入（欄位已內建於 `.env` / `.env.example`）：
+
+   ```bash
+   DISCORD_TOKEN=你的_Bot_Token
+   DISCORD_CHANNEL_ID=要推播的頻道ID
+   DISCORD_POLL_INTERVAL_MIN=30   # 選填，背景輪詢間隔（分鐘），預設 30
+   DISCORD_MIN_DISCOUNT=0         # 選填，低於平均價多少%才推播，預設 0
+   ```
+
+3. 建立 Bot 並取得 Token：
+   - 前往 https://discord.com/developers/applications → New Application → **Bot**
+   - 開啟 **Message Content Intent**（`Bot → Privileged Gateway Intents`）
+   - **Reset Token** 複製後填入 `DISCORD_TOKEN`
+   - 用 OAuth2 URL 把 Bot 邀請進你的伺服器（勾 `bot`，權限勾 `Send Messages` / `Read Messages` / `Embed Links`）
+
+4. 取得頻道 ID：Discord 設定 → 進階 → 開啟**開發者模式**，對頻道按右鍵 → 複製 ID。
+
+### 啟動
+
+```bash
+npm run bot
+```
+
+### 指令
+
+| 指令 | 說明 |
+| --- | --- |
+| `!search <關鍵字>` | 即時搜尋 eBay，回傳最平前 5 筆卡片 |
+| `!rare <關鍵字> [價格範圍]` | 搜尋 /99 以下高稀缺卡片，且低於在售平均價；範圍可用 `100-500` / `500+` / `-500` 或 `cheap`/`mid`/`high`/`premium` |
+| `!add <關鍵字>` | 把關鍵字加入背景輪詢監測清單（寫入 `presets.json` 的 `_watchlist`） |
+| `!list` | 顯示目前監測中的關鍵字清單 |
+| `!help` | 顯示指令說明 |
+
+### 甜甜價自動推播
+
+- Bot 每 `DISCORD_POLL_INTERVAL_MIN` 分鐘，對 `_watchlist` 的每個關鍵字跑一次掃描。
+- 發現**低於歷史平均價**的卡片，就推播 Rich Embed 到 `DISCORD_CHANNEL_ID`，內含：
+  - 卡片標題、當前價格、歷史平均價、折扣幅度
+  - 一個「前往 eBay 查看」連結按鈕（可直接點跳轉 eBay 頁面）
+- 同一 session 內不會重複推播同一張卡（以 itemId 去重）。
+
+---
+
+## 部署到 Render（24/7 免費託管）
+
+想讓 Bot 在你電腦關機後都照常運作，可部署到 Render 免費方案。已備妥：
+- `Dockerfile`：精簡映像（僅 Node.js + discord.js + eBay API，不含 playwright/puppeteer）
+- `.dockerignore`：排除 node_modules / .env 等
+- `render.yaml`：Render Blueprint 設定（Web Service + 環境變數）
+
+### ⚠️ 免費方案重點
+1. Render Free **只支援 Web Service**（不支援 Background Worker），所以本 Bot 以 Web Service 形式部署，並在 `src/discordBot.js` 內建 PORT 健康檢查伺服器。
+2. 免費 Web Service **閒置約 15 分鐘會自動休眠**；要 24/7 常駐，請用外部監測（UptimeRobot / cron-job.org）每 5–10 分鐘 ping 一次服務網址。
+3. 免費方案**檔案系統是暫時的**：重新部署後 `presets.json` 的變更（例如 `!add` 加的關鍵字）會還原；建議直接把監測關鍵字寫進 `presets.json` 再 push。
+
+### 必填環境變數
+`EBAY_CLIENT_ID`、`EBAY_CLIENT_SECRET`、`DISCORD_TOKEN`、`DISCORD_CHANNEL_ID`。
+
+> ⚠️ 一定要設 eBay API 憑證，否則 bot 會退回爬蟲模式（映像檔沒有瀏覽器引擎）而失敗。
+
+

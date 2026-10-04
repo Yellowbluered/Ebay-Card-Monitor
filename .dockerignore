@@ -1,0 +1,43 @@
+# ── 依賴（在映像內重新安裝，不可帶入本機 node_modules）──────
+node_modules/
+
+# ── 機密（eBay / Discord 憑證一律用 Render 環境變數，不可烤進映像）──
+.env
+.env.local
+.env.*.local
+
+# ── Git 元資料 ──────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── 程式產出 / 除錯暫存 ─────────────────────────────────────
+out/
+reports/
+fixtures/
+*.csv
+*.log
+*-report.json
+result*.json
+listings*.json
+deals*.json
+_debug/
+_probe*
+_cli_*.txt
+
+# ── 文件（執行期不需要）─────────────────────────────────────
+*.md
+README.md
+
+# ── 爬蟲快取 / 報告（映像內沒有瀏覽器引擎）──────────────────
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+pw-browsers/
+
+# ── 編輯器 / 作業系統 ───────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
