@@ -491,7 +491,8 @@ async function runPoll(client) {
 
 async function main() {
   loadEnv();
-  const token = process.env.DISCORD_TOKEN;
+  // 去除前後空白：在 Render 手動貼 token 時很容易夾帶換行或空白，導致登入失敗。
+  const token = (process.env.DISCORD_TOKEN || '').trim();
   if (!token) {
     console.error('❌ 未設定 DISCORD_TOKEN。請在 .env 加入 DISCORD_TOKEN 與 DISCORD_CHANNEL_ID，再執行 npm run bot。');
     process.exitCode = 1;
@@ -503,8 +504,9 @@ async function main() {
   // （UptimeRobot / cron-job.org）定期 ping 保持常駐。
   // 本地跑「npm run bot」時沒有 PORT，會自動略過，完全不影響原本使用。
   const port = numEnv('PORT', 0);
+  let server = null;
   if (port > 0) {
-    http.createServer((req, res) => {
+    server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('OK');
     }).listen(port, () => log(`🌐 健康檢查伺服器已啟動（PORT=${port}）`));
@@ -534,12 +536,42 @@ async function main() {
 
   client.on(Events.Error, (err) => log(`⚠ Discord 錯誤：${err.message}`));
 
-  await client.login(token);
+  // 明確處理登入結果：成功就會在 Events.ClientReady 印出「已上線」；
+  // 失敗則印出完整錯誤原因，並關閉健康檢查伺服器讓程序結束。
+  // 否則健康檢查伺服器會讓程序一直存活，造成「Bot 離線卻看不到錯誤」的假象。
+  const LOGIN_TIMEOUT_MS = 60_000;
+  let loginTimer = null;
+  try {
+    await Promise.race([
+      client.login(token),
+      new Promise((_, reject) => {
+        loginTimer = setTimeout(() => {
+          reject(new Error(
+            `Discord 登入逾時（${LOGIN_TIMEOUT_MS / 1000} 秒）。` +
+            '請確認 DISCORD_TOKEN 正確、且伺服器能連到 gateway.discord.gg。'
+          ));
+        }, LOGIN_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (err) {
+    console.error('❌ Discord Bot 登入失敗，詳細原因：');
+    console.error(err && err.stack ? err.stack : String(err));
+    if (err && err.code) console.error(`   code   = ${err.code}`);
+    if (err && err.httpStatus) console.error(`   status = ${err.httpStatus}`);
+    try { client.destroy(); } catch (_) { /* ignore */ }
+    if (server) server.close();
+    process.exitCode = 1;
+    // 保險：若仍有其他 handle 讓事件迴圈無法自然結束，5 秒後強制結束。
+    setTimeout(() => process.exit(1), 5000).unref();
+    return;
+  } finally {
+    if (loginTimer) clearTimeout(loginTimer);
+  }
 }
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(`❌ ${err.name || 'Error'}: ${err.message}`);
+    console.error(`❌ 啟動失敗：${err && err.stack ? err.stack : err}`);
     process.exitCode = 1;
   });
 }

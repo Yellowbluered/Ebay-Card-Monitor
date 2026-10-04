@@ -8,7 +8,7 @@
     "ebay-card-scan": "src/index.js"
   },
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/discordBot.js",
     "bot": "node src/discordBot.js",
     "demo": "node src/index.js --demo",
     "scan": "node src/index.js",
