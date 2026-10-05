@@ -2,13 +2,11 @@
   "_comment": "預設別名：node src/index.js @pokemon 即可展開成完整查詢。欄位皆選填；命令列參數優先於這裡的設定。可用 --list-presets 查看。",
   "_watchlist": {
     "1556222538852339744": [
-      "marvel psa 10",
-      "spiderman psa 10",
-      "marvel masterpieces psa 10",
-      "wolverine psa 10",
-      "spiderman /25",
-      "marvel sketch /10",
-      "wolverine auto /50"
+      "marvel masterpieces psa 10 -football -nfl -panini -prizm -select -donruss",
+      "marvel metal universe psa 10 -football -nfl -panini -prizm -select -donruss",
+      "fleer marvel psa 10 -football -nfl -panini -prizm -select -donruss",
+      "spiderman psa 10 -football -nfl -panini -prizm -select -donruss",
+      "wolverine psa 10 -football -nfl -panini -prizm -select -donruss"
     ],
     "1556297840966238339": [
       "tennis card psa 10",

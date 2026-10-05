@@ -583,7 +583,7 @@ async function main() {
   client.once(Events.ClientReady, async (c) => {
     log(`✅ Discord Bot 已上線：${c.user.tag}`);
     await runPoll(client).catch((err) => log(`⚠ 初始輪詢失敗：${err.message}`));
-    const intervalMin = Math.max(1, numEnv('DISCORD_POLL_INTERVAL_MIN', 30));
+    const intervalMin = Math.max(1, numEnv('DISCORD_POLL_INTERVAL_MIN', 120));
     setInterval(() => {
       runPoll(client).catch((err) => log(`⚠ 輪詢失敗：${err.message}`));
     }, intervalMin * 60_000);

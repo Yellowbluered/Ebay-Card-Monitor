@@ -363,7 +363,7 @@ run.cmd "charizard psa 10" --source scrape --sold-ref --sold-vs 10 --sold-pages 
    ```bash
    DISCORD_TOKEN=你的_Bot_Token
    DISCORD_CHANNEL_ID=要推播的頻道ID
-   DISCORD_POLL_INTERVAL_MIN=30   # 選填，背景輪詢間隔（分鐘），預設 30
+   DISCORD_POLL_INTERVAL_MIN=120   # 選填，背景輪詢間隔（分鐘），預設 120（2 小時）
    DISCORD_MIN_DISCOUNT=0         # 選填，低於平均價多少%才推播，預設 0
    ```
 

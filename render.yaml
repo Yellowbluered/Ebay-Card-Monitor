@@ -32,6 +32,6 @@ services:
       - key: DISCORD_CHANNEL_ID
         sync: false
       - key: DISCORD_POLL_INTERVAL_MIN
-        value: "30"
+        value: "120"
       - key: DISCORD_MIN_DISCOUNT
         value: "0"
