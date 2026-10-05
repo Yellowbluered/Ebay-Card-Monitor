@@ -537,17 +537,21 @@ async function main() {
   }
 
   // Render 免費方案只有「Web Service」（不含 Background Worker），
-  // 所以需要監聽 PORT 提供健康檢查，並方便用外部 uptime 監測
-  // （UptimeRobot / cron-job.org）定期 ping 保持常駐。
-  // 本地跑「npm run bot」時沒有 PORT，會自動略過，完全不影響原本使用。
-  const port = numEnv('PORT', 0);
+  // 所以要率先啟動 Health Check 伺服器監聽 PORT（預設 10000），
+  // 讓 Render 健康檢查能第一時間回傳 200 通過，之後先至登入 Discord。
+  const port = Number(process.env.PORT) || 10000;
   let server = null;
-  if (port > 0) {
+  const serverReady = new Promise((resolve, reject) => {
     server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('OK');
-    }).listen(port, () => log(`🌐 健康檢查伺服器已啟動（PORT=${port}）`));
-  }
+      res.end('HTTP 200 OK - Bot is alive');
+    });
+    server.once('error', reject);
+    server.listen(port, () => {
+      log(`[HealthCheck] Server is listening on port ${port}`);
+      resolve();
+    });
+  });
 
   const client = new Client({
     intents: [
@@ -573,9 +577,12 @@ async function main() {
 
   client.on(Events.Error, (err) => log(`⚠ Discord 錯誤：${err.message}`));
 
+  // 等 Health Check 伺服器成功啟動後，先至登入 Discord。
   // 明確處理登入結果：成功就會在 Events.ClientReady 印出「已上線」；
   // 失敗則印出完整錯誤原因，並關閉健康檢查伺服器讓程序結束。
   // 否則健康檢查伺服器會讓程序一直存活，造成「Bot 離線卻看不到錯誤」的假象。
+  await serverReady;
+
   const LOGIN_TIMEOUT_MS = 60_000;
   let loginTimer = null;
   try {
