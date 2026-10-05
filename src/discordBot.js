@@ -60,6 +60,18 @@ function numEnv(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** 給 Promise 加上逾時，超時即 reject */
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** 等待指定毫秒 */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** 解析 DISCORD_CHANNEL_ID（支援以逗號分隔多個推播頻道） */
 function getChannelIds() {
   const raw = process.env.DISCORD_CHANNEL_ID || '';
@@ -559,6 +571,13 @@ async function main() {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],
+    // REST / WebSocket 逾時與重試設定（避免登入死等）
+    rest: {
+      timeout: 15_000, // REST 請求逾時（毫秒）
+      retries: 3,      // 遇到 429 限流時自動重試次數
+    },
+    closeTimeout: 10_000,     // WebSocket 關閉前的等待時間
+    waitGuildTimeout: 15_000, // 等待 guild 資料的逾時
   });
 
   client.once(Events.ClientReady, async (c) => {
@@ -575,41 +594,69 @@ async function main() {
     handleCommand(message, client).catch((err) => log(`⚠ 指令處理失敗：${err.message}`));
   });
 
-  client.on(Events.Error, (err) => log(`⚠ Discord 錯誤：${err.message}`));
-
-  // 等 Health Check 伺服器成功啟動後，先至登入 Discord。
-  // 明確處理登入結果：成功就會在 Events.ClientReady 印出「已上線」；
-  // 失敗則印出完整錯誤原因，並關閉健康檢查伺服器讓程序結束。
-  // 否則健康檢查伺服器會讓程序一直存活，造成「Bot 離線卻看不到錯誤」的假象。
-  await serverReady;
-
-  const LOGIN_TIMEOUT_MS = 60_000;
-  let loginTimer = null;
-  try {
-    await Promise.race([
-      client.login(token),
-      new Promise((_, reject) => {
-        loginTimer = setTimeout(() => {
-          reject(new Error(
-            `Discord 登入逾時（${LOGIN_TIMEOUT_MS / 1000} 秒）。` +
-            '請確認 DISCORD_TOKEN 正確、且伺服器能連到 gateway.discord.gg。'
-          ));
-        }, LOGIN_TIMEOUT_MS);
-      }),
-    ]);
-  } catch (err) {
-    console.error('❌ Discord Bot 登入失敗，詳細原因：');
+  // 詳盡 Log：debug 較多輸出，可用環境變數 DISCORD_DEBUG=1 開啟
+  client.on(Events.Debug, (info) => {
+    if (process.env.DISCORD_DEBUG === '1') log(`🐞 ${info}`);
+  });
+  client.on(Events.Warn, (warn) => log(`⚠️ ${warn}`));
+  client.on(Events.Error, (err) => {
+    console.error('❌ Discord Client Error：');
     console.error(err && err.stack ? err.stack : String(err));
     if (err && err.code) console.error(`   code   = ${err.code}`);
     if (err && err.httpStatus) console.error(`   status = ${err.httpStatus}`);
+  });
+  client.on(Events.ShardError, (err, shardId) => {
+    console.error(`❌ Shard ${shardId} Error：`);
+    console.error(err && err.stack ? err.stack : String(err));
+    if (err && err.code) console.error(`   code   = ${err.code}`);
+  });
+  client.on(Events.ShardDisconnect, (closeEvent, shardId) => {
+    log(`⚠️ Shard ${shardId} 斷線：code=${closeEvent && closeEvent.code} reason=${closeEvent && closeEvent.reason}`);
+  });
+  client.on(Events.ShardReconnecting, (shardId) => log(`🔄 Shard ${shardId} 重新連線中…`));
+
+  // 等 Health Check 伺服器成功啟動後，先至登入 Discord。
+  await serverReady;
+
+  // 登入自動重試：每次最多等 LOGIN_TIMEOUT_MS，失敗後等 LOGIN_RETRY_DELAY_MS 再重試（最多 MAX_LOGIN_ATTEMPTS 次）。
+  const MAX_LOGIN_ATTEMPTS = 3;
+  const LOGIN_TIMEOUT_MS = 20_000;
+  const LOGIN_RETRY_DELAY_MS = 5_000;
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt += 1) {
+    try {
+      log(`🔐 嘗試登入 Discord（第 ${attempt}/${MAX_LOGIN_ATTEMPTS} 次）…`);
+      await withTimeout(
+        client.login(token),
+        LOGIN_TIMEOUT_MS,
+        `Discord 登入逾時（${LOGIN_TIMEOUT_MS / 1000} 秒）。請確認 DISCORD_TOKEN 正確、且伺服器能連到 gateway.discord.gg。`
+      );
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      console.error(`❌ 第 ${attempt} 次登入失敗：`);
+      console.error(err && err.stack ? err.stack : String(err));
+      if (err && err.code) console.error(`   code   = ${err.code}`);
+      if (err && err.httpStatus) console.error(`   status = ${err.httpStatus}`);
+      // 先 destroy，確保下一個循環可以重新 login
+      try { client.destroy(); } catch (_) { /* ignore */ }
+      if (attempt < MAX_LOGIN_ATTEMPTS) {
+        log(`⏳ ${LOGIN_RETRY_DELAY_MS / 1000} 秒後重試登入…`);
+        await sleep(LOGIN_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  if (lastError) {
+    console.error('❌ Discord Bot 登入失敗（已重試多次），將結束程序。');
     try { client.destroy(); } catch (_) { /* ignore */ }
     if (server) server.close();
     process.exitCode = 1;
     // 保險：若仍有其他 handle 讓事件迴圈無法自然結束，5 秒後強制結束。
     setTimeout(() => process.exit(1), 5000).unref();
     return;
-  } finally {
-    if (loginTimer) clearTimeout(loginTimer);
   }
 }
 
