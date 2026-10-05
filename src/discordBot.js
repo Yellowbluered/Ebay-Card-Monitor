@@ -6,13 +6,12 @@
  * 指令：
  *   !search <關鍵字>   即時搜尋 eBay，回傳最平前 5 筆卡片
  *   !rare <關鍵字>     搜尋高稀缺卡片（自動套用稀缺過濾 + 最高價優先）
- *   !add <關鍵字>      加入背景輪詢監測清單（寫入 presets.json 的 _watchlist）
+ *   !add <關鍵字>      加入「本頻道」的背景輪詢監測清單（寫入 presets.json 的 _watchlist[頻道ID]）
  *   !list              顯示目前監測中的關鍵字
  *   !help              顯示說明
  *
- * 背景輪詢：依 DISCORD_POLL_INTERVAL_MIN 間隔，對 _watchlist 每個關鍵字跑一次掃描，
- *           發現低於歷史平均價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到
- *           DISCORD_CHANNEL_ID。
+ * 背景輪詢：依 DISCORD_POLL_INTERVAL_MIN 間隔，對「每個頻道各自」的 _watchlist 關鍵字跑掃描，
+ *           發現低於歷史平均價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到「該關鍵字所屬的頻道」。
  *
  * 需在 .env 設定：DISCORD_TOKEN、DISCORD_CHANNEL_ID（必要，可逗號分隔多個頻道）
  *                DISCORD_POLL_INTERVAL_MIN、DISCORD_MIN_DISCOUNT（選填）
@@ -149,21 +148,38 @@ function writePresets(presets) {
   fs.writeFileSync(PRESETS_FILE, `${JSON.stringify(presets, null, 2)}\n`, 'utf8');
 }
 
+/** 讀取 per-channel 監測清單：{ 頻道ID: [關鍵字...] } */
 function readWatchlist() {
   const presets = loadPresets();
-  const arr = presets[WATCH_KEY];
-  if (!Array.isArray(arr)) return [];
-  return arr.map((s) => String(s).trim()).filter(Boolean);
+  const raw = presets[WATCH_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [channelId, arr] of Object.entries(raw)) {
+    if (Array.isArray(arr)) {
+      const list = arr.map((s) => String(s).trim()).filter(Boolean);
+      if (list.length) out[channelId] = list;
+    }
+  }
+  return out;
 }
 
-function addWatchKeyword(keyword) {
+/** 讀取指定頻道的監測關鍵字 */
+function readWatchlistFor(channelId) {
+  return readWatchlist()[channelId] || [];
+}
+
+/** 把關鍵字加入指定頻道的監測清單（寫入 presets.json 的 _watchlist[頻道ID]） */
+function addWatchKeyword(channelId, keyword) {
   const presets = loadPresets();
-  const list = Array.isArray(presets[WATCH_KEY]) ? presets[WATCH_KEY] : [];
+  const raw = presets[WATCH_KEY];
+  const map = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const list = Array.isArray(map[channelId]) ? map[channelId] : [];
   const normalized = String(keyword).trim();
   const exists = list.includes(normalized);
   if (!exists) {
     list.push(normalized);
-    presets[WATCH_KEY] = list;
+    map[channelId] = list;
+    presets[WATCH_KEY] = map;
     writePresets(presets);
   }
   return { added: !exists, keyword: normalized, list };
@@ -363,11 +379,6 @@ async function handleSearch(message, keyword, client) {
         const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
         await message.channel.send({ embeds: d.embeds, components: d.components });
       }
-
-      // 方案 B：同步推送到所有 DISCORD_CHANNEL_ID（排除指令所在的頻道，避免重複）
-      if (client) {
-        await pushDealsToAlertChannel(client, keyword, dealsToShow, res.stats, res.targetCurrency, message.channel.id);
-      }
     }
   } catch (err) {
     await loading.edit(`❌ 搜尋失敗：${err.message}`).catch(() => {});
@@ -422,23 +433,23 @@ async function handleAdd(message, keyword) {
     return;
   }
   try {
-    const { added, keyword: kw, list } = addWatchKeyword(keyword);
+    const { added, keyword: kw, list } = addWatchKeyword(message.channel.id, keyword);
     const summary = list.length
-      ? `\n\n📋 目前監測清單（${list.length} 筆）：\n${formatWatchSummary(list)}`
-      : '\n\n📋 目前監測清單為空。';
-    await message.reply(`${added ? '✅ 已加入' : 'ℹ 已存在'}監測清單：**${kw}**${summary}`);
+      ? `\n\n📋 本頻道監測清單（${list.length} 筆）：\n${formatWatchSummary(list)}`
+      : '\n\n📋 本頻道監測清單為空。';
+    await message.reply(`${added ? '✅ 已加入' : 'ℹ 已存在'}本頻道監測清單：**${kw}**${summary}`);
   } catch (err) {
     await message.reply(`❌ 加入失敗：${err.message}`);
   }
 }
 
 async function handleList(message) {
-  const list = readWatchlist();
+  const list = readWatchlistFor(message.channel.id);
   if (!list.length) {
-    await message.reply('目前沒有監測中的關鍵字。用 `!add <關鍵字>` 加入。');
+    await message.reply('本頻道目前沒有監測中的關鍵字。用 `!add <關鍵字>` 加入。');
     return;
   }
-  await message.reply(`📋 目前監測的關鍵字（${list.length} 筆）：\n${formatWatchSummary(list)}`);
+  await message.reply(`📋 本頻道目前監測的關鍵字（${list.length} 筆）：\n${formatWatchSummary(list)}`);
 }
 
 async function handleHelp(message) {
@@ -446,7 +457,7 @@ async function handleHelp(message) {
     '**eBay 卡價監測 Bot 指令**',
     '`!search <關鍵字>` — 即時搜尋 eBay，回傳最平前 5 筆卡片',
     '`!rare <關鍵字> [價格範圍]` — 搜尋 /99 以下高稀缺卡片，且低於在售平均價；範圍可用 100-500 / 500+ / -500 或 cheap/mid/high/premium',
-    '`!add <關鍵字>` — 把關鍵字加入背景輪詢監測清單（寫入 presets.json）',
+    '`!add <關鍵字>` — 把關鍵字加入「本頻道」的背景輪詢監測清單（寫入 presets.json）',
     '`!list` — 顯示目前監測中的關鍵字清單',
     '`!help` — 顯示本說明',
   ].join('\n'));
@@ -476,34 +487,39 @@ async function runPoll(client) {
   if (!ids.length) { log('⚠ 未設定 DISCORD_CHANNEL_ID，略過甜甜價推播。'); return; }
   if (!channels.length) { log('⚠ 所有推播頻道都找不到，略過推播。'); return; }
 
-  const list = readWatchlist();
-  if (!list.length) { log('ℹ 監測清單為空，略過輪詢（用 !add 加入關鍵字）。'); return; }
-
+  const watch = readWatchlist();
   const minDiscountPct = numEnv('DISCORD_MIN_DISCOUNT', 0);
-  for (const keyword of list) {
-    try {
-      log(`▶ 輪詢「${keyword}」…`);
-      const res = await scanFor(keyword, { minDiscountPct, top: MAX_PUSH_PER_QUERY, log });
-      const fresh = res.deals.filter((d) => {
-        const id = d.listing.itemId || d.listing.url;
-        return id && !alertedIds.has(id);
-      });
-      for (const deal of fresh.slice(0, MAX_PUSH_PER_QUERY)) {
-        const id = deal.listing.itemId || deal.listing.url;
-        if (id) alertedIds.add(id);
-        const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
-        for (const channel of channels) {
+
+  // 每個頻道只掃自己嘅監測關鍵字，並只推回自己嘅頻道
+  for (const channel of channels) {
+    const list = watch[channel.id] || [];
+    if (!list.length) {
+      log(`ℹ 頻道 ${channel.id} 沒有監測關鍵字，略過（用 !add 加入）。`);
+      continue;
+    }
+    for (const keyword of list) {
+      try {
+        log(`▶ 輪詢「${keyword}」→ 頻道 ${channel.id} …`);
+        const res = await scanFor(keyword, { minDiscountPct, top: MAX_PUSH_PER_QUERY, log });
+        const fresh = res.deals.filter((d) => {
+          const id = d.listing.itemId || d.listing.url;
+          return id && !alertedIds.has(id);
+        });
+        for (const deal of fresh.slice(0, MAX_PUSH_PER_QUERY)) {
+          const id = deal.listing.itemId || deal.listing.url;
+          if (id) alertedIds.add(id);
+          const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
           await channel.send({ embeds: d.embeds, components: d.components });
+          log(`  🔔 推播甜甜價至頻道 ${channel.id}：${deal.listing.title}`);
         }
-        log(`  🔔 推播甜甜價：${deal.listing.title}`);
+        if (alertedIds.size > 5000) {
+          const keep = [...alertedIds].slice(-2000);
+          alertedIds.clear();
+          for (const id of keep) alertedIds.add(id);
+        }
+      } catch (err) {
+        log(`⚠ 輪詢「${keyword}」失敗：${err.message}`);
       }
-      if (alertedIds.size > 5000) {
-        const keep = [...alertedIds].slice(-2000);
-        alertedIds.clear();
-        for (const id of keep) alertedIds.add(id);
-      }
-    } catch (err) {
-      log(`⚠ 輪詢「${keyword}」失敗：${err.message}`);
     }
   }
 }
