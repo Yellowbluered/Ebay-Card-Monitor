@@ -14,7 +14,7 @@
  *           發現低於歷史平均價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到
  *           DISCORD_CHANNEL_ID。
  *
- * 需在 .env 設定：DISCORD_TOKEN、DISCORD_CHANNEL_ID（必要）
+ * 需在 .env 設定：DISCORD_TOKEN、DISCORD_CHANNEL_ID（必要，可逗號分隔多個頻道）
  *                DISCORD_POLL_INTERVAL_MIN、DISCORD_MIN_DISCOUNT（選填）
  */
 
@@ -59,6 +59,24 @@ function numEnv(name, fallback) {
   if (v === undefined || v === null || v === '') return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** 解析 DISCORD_CHANNEL_ID（支援以逗號分隔多個推播頻道） */
+function getChannelIds() {
+  const raw = process.env.DISCORD_CHANNEL_ID || '';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** 取得所有可用的推播頻道（找不到的會印警告並略過） */
+async function resolveAlertChannels(client) {
+  const ids = getChannelIds();
+  const channels = [];
+  for (const id of ids) {
+    const channel = await client.channels.fetch(id).catch(() => null);
+    if (channel) channels.push(channel);
+    else log(`⚠ 找不到頻道 ${id}，略過此頻道。`);
+  }
+  return { ids, channels };
 }
 
 function dominantCurrency(listings, fallback) {
@@ -346,9 +364,9 @@ async function handleSearch(message, keyword, client) {
         await message.channel.send({ embeds: d.embeds, components: d.components });
       }
 
-      // 方案 B：同步推送一份到 DISCORD_CHANNEL_ID（若指令不是在該頻道發出的話，避免重複）
-      if (client && message.channel.id !== process.env.DISCORD_CHANNEL_ID) {
-        await pushDealsToAlertChannel(client, keyword, dealsToShow, res.stats, res.targetCurrency);
+      // 方案 B：同步推送到所有 DISCORD_CHANNEL_ID（排除指令所在的頻道，避免重複）
+      if (client) {
+        await pushDealsToAlertChannel(client, keyword, dealsToShow, res.stats, res.targetCurrency, message.channel.id);
       }
     }
   } catch (err) {
@@ -356,15 +374,18 @@ async function handleSearch(message, keyword, client) {
   }
 }
 
-/** 把甜甜價結果同步推送到 DISCORD_CHANNEL_ID（方案 B） */
-async function pushDealsToAlertChannel(client, keyword, deals, stats, currency) {
-  const channelId = process.env.DISCORD_CHANNEL_ID;
-  if (!client || !channelId) return;
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel) { log(`⚠ 找不到推播頻道 ${channelId}，略過同步推播。`); return; }
+/** 把甜甜價結果同步推送到所有 DISCORD_CHANNEL_ID（方案 B）；excludeChannelId 會被略過 */
+async function pushDealsToAlertChannel(client, keyword, deals, stats, currency, excludeChannelId) {
+  if (!client) return;
+  const { ids, channels } = await resolveAlertChannels(client);
+  if (!ids.length) return;
+  const targets = channels.filter((c) => c.id !== excludeChannelId);
+  if (!targets.length) return;
   for (const deal of deals) {
     const d = buildDealEmbed(keyword, deal, stats.baseline, currency);
-    await channel.send({ embeds: d.embeds, components: d.components });
+    for (const channel of targets) {
+      await channel.send({ embeds: d.embeds, components: d.components });
+    }
     log(`  📣 同步推播至監測頻道：${deal.listing.title}`);
   }
 }
@@ -451,11 +472,9 @@ async function handleCommand(message, client) {
 const alertedIds = new Set();
 
 async function runPoll(client) {
-  const channelId = process.env.DISCORD_CHANNEL_ID;
-  if (!channelId) { log('⚠ 未設定 DISCORD_CHANNEL_ID，略過甜甜價推播。'); return; }
-
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel) { log(`⚠ 找不到頻道 ${channelId}，略過推播。`); return; }
+  const { ids, channels } = await resolveAlertChannels(client);
+  if (!ids.length) { log('⚠ 未設定 DISCORD_CHANNEL_ID，略過甜甜價推播。'); return; }
+  if (!channels.length) { log('⚠ 所有推播頻道都找不到，略過推播。'); return; }
 
   const list = readWatchlist();
   if (!list.length) { log('ℹ 監測清單為空，略過輪詢（用 !add 加入關鍵字）。'); return; }
@@ -473,7 +492,9 @@ async function runPoll(client) {
         const id = deal.listing.itemId || deal.listing.url;
         if (id) alertedIds.add(id);
         const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
-        await channel.send({ embeds: d.embeds, components: d.components });
+        for (const channel of channels) {
+          await channel.send({ embeds: d.embeds, components: d.components });
+        }
         log(`  🔔 推播甜甜價：${deal.listing.title}`);
       }
       if (alertedIds.size > 5000) {
