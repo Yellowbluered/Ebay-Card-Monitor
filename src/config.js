@@ -130,7 +130,7 @@ eBay 卡牌價格掃描器 — 找出「在售（未售出）」且價格 <= 平
   --limit 200                                 取幾筆「在售」商品（Browse API 單次上限 200）
   --pages 1                                   API = 抓幾批；scrape = 翻幾頁
   --top 25                                    最多列出幾筆甜甜價（0 = 全部）
-  --baseline mean|median|trimmed              平均價基準（預設 mean，且已先濾離群值）
+  --baseline mean|median|trimmed              基準價（預設 median 中位數，且已先濾離群值）
   --trim 0.1                                  baseline=trimmed 時的修剪比例
   --no-outlier-filter                         關閉 IQR 離群值過濾
   --iqr-k 1.5                                 IQR 倍數
@@ -198,7 +198,7 @@ function buildConfig(argv) {
     limit: Math.max(1, Math.min(num(args.limit, 200), 200)),
     pages: Math.max(1, num(args.pages, 1)),
     top: Math.max(0, num(args.top, 25)),
-    baseline: str(args.baseline, 'mean').toLowerCase(),
+    baseline: str(args.baseline, 'median').toLowerCase(),
     trim: num(args.trim, 0.1),
     outlierFilter: bool(args.outlierFilter, true),
     iqrK: num(args.iqrK, 1.5),

@@ -92,7 +92,7 @@ function renderSummary({ cfg, stats, meta }) {
   const cur = meta.currency || cfg.currency || 'USD';
   const lines = [];
   lines.push('═'.repeat(72));
-  lines.push('  eBay 卡牌價格掃描 — 找出在售且低於平均價的甜甜價');
+  lines.push('  eBay 卡牌價格掃描 — 找出在售且低於基準價的甜甜價');
   lines.push('═'.repeat(72));
   lines.push(`  搜尋關鍵字   : ${cfg.query}`);
   lines.push(`  資料來源     : ${meta.sourceLabel}`);
@@ -104,7 +104,7 @@ function renderSummary({ cfg, stats, meta }) {
   if (meta.otherCurrencies) lines.push(`  其他幣別略過 : ${meta.otherCurrencies} 筆`);
   lines.push('');
   lines.push(`  有效樣本     : ${stats.usedCount} 筆${stats.removed ? `（IQR 濾除 ${stats.removed} 筆離群值）` : ''}`);
-  lines.push(`  ── 平均價基準（${stats.baselineKind === 'mean' ? '平均價' : stats.baselineKind === 'median' ? '中位數' : '修剪平均'}）: ${formatMoney(stats.baseline, cur)}`);
+  lines.push(`  ── 基準價（${stats.baselineKind === 'mean' ? '平均價' : stats.baselineKind === 'median' ? '中位數' : '修剪平均'}）: ${formatMoney(stats.baseline, cur)}`);
   lines.push(`  平均價       : ${formatMoney(stats.mean, cur)}`);
   lines.push(`  中位數       : ${formatMoney(stats.median, cur)}`);
   lines.push(`  修剪平均     : ${formatMoney(stats.trimmedMean, cur)}`);
@@ -113,7 +113,7 @@ function renderSummary({ cfg, stats, meta }) {
   lines.push(`  價格區間     : ${formatMoney(stats.min, cur)} ~ ${formatMoney(stats.max, cur)}`);
   lines.push('');
   lines.push(
-    `  ✅ 符合「<= 平均價${cfg.minDiscount > 0 ? ` 且低於 ${cfg.minDiscount}% 以上` : ''}」: ${meta.dealCount} 筆`
+    `  ✅ 符合「<= 基準價${cfg.minDiscount > 0 ? ` 且低於 ${cfg.minDiscount}% 以上` : ''}」: ${meta.dealCount} 筆`
   );
   lines.push('═'.repeat(72));
   return lines.join('\n');
@@ -123,10 +123,10 @@ function renderSummary({ cfg, stats, meta }) {
 function renderDeals(deals, stats, cfg) {
   const cur = cfg.currency || deals[0]?.listing.currency || 'USD';
   if (!deals.length) {
-    return '\n（沒有找到 <= 平均價的商品，可嘗試放寬 --min-price/--max-price 或加大 --limit。）\n';
+    return '\n（沒有找到 <= 基準價的商品，可嘗試放寬 --min-price/--max-price 或加大 --limit。）\n';
   }
 
-  const headers = ['#', '標題', '價格', '折扣', '比平均便宜', '商品連結'];
+  const headers = ['#', '標題', '價格', '折扣', '比基準便宜', '商品連結'];
   if (cfg.sellerInfo) headers.push('賣家', '運費');
 
   const rows = deals.map((deal, index) => {

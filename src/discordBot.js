@@ -11,7 +11,7 @@
  *   !help              顯示說明
  *
  * 背景輪詢：依 DISCORD_POLL_INTERVAL_MIN 間隔，對「每個頻道各自」的 _watchlist 關鍵字跑掃描，
- *           發現低於歷史平均價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到「該關鍵字所屬的頻道」。
+ *           發現低於歷史中位價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到「該關鍵字所屬的頻道」。
  *
  * 需在 .env 設定：DISCORD_TOKEN、DISCORD_CHANNEL_ID（必要，可逗號分隔多個頻道）
  *                DISCORD_POLL_INTERVAL_MIN、DISCORD_MIN_DISCOUNT（選填）
@@ -34,7 +34,7 @@ const {
 const { loadEnv, buildConfig, ROOT } = require('./config');
 const { collectListings } = require('./sources');
 const { summarize, findDeals } = require('./stats');
-const { matchesAnyKeyword } = require('./parse');
+const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase } = require('./parse');
 const { formatMoney, formatPct, truncate } = require('./report');
 
 const PRESETS_FILE = path.join(ROOT, 'presets.json');
@@ -201,7 +201,7 @@ function addWatchKeyword(channelId, keyword) {
 
 async function scanFor(keyword, opts = {}) {
   const logFn = opts.log || (() => {});
-  const cfg = buildConfig(['--limit', '100', '--pages', '1', '--baseline', 'mean', String(keyword)]);
+  const cfg = buildConfig(['--limit', '100', '--pages', '1', '--baseline', 'median', String(keyword)]);
   const collected = await collectListings(cfg, logFn);
 
   let targetCurrency = cfg.currency || dominantCurrency(collected.listings, null);
@@ -212,6 +212,15 @@ async function scanFor(keyword, opts = {}) {
       targetCurrency = dom;
       ({ kept, counts } = applyFilters(collected.listings, cfg, targetCurrency));
     }
+  }
+
+  // 普卡防呆：查詢關鍵字本身不含限量/簽名訊號（視為普卡）時，
+  // 排除標題含 Auto / Signature / 1/1 / One of One / 低編號 的限量與簽名 listing，
+  // 避免把限量卡、簽名卡混入普卡基準價（中位數）而拉高基準。
+  if (opts.excludeScarce !== false && queryIsBase(keyword)) {
+    const before = kept.length;
+    kept = kept.filter((l) => !titleHasScarcitySignal(l.title));
+    counts.excludedScarce = before - kept.length;
   }
 
   const stats = summarize(kept.map((l) => l.price), {
@@ -226,7 +235,7 @@ async function scanFor(keyword, opts = {}) {
   return { cfg, collected, targetCurrency, kept, counts, stats, deals, cheapest };
 }
 
-/** 高稀缺卡片搜尋：多稀缺詞各搜一次 → 合併去重 → 價格區間過濾 → 低於在售平均價過濾 → 依價格最高排序 */
+/** 高稀缺卡片搜尋：多稀缺詞各搜一次 → 合併去重 → 價格區間過濾 → 低於在售中位價過濾 → 依價格最高排序 */
 async function scanRare(keyword, opts = {}) {
   const logFn = opts.log || (() => {});
   const top = typeof opts.top === 'number' ? opts.top : 10;
@@ -269,7 +278,7 @@ async function scanRare(keyword, opts = {}) {
     }
   }
 
-  // 3) 以「在售平均價」當成交價參考，只留低於平均價者
+  // 3) 以「在售中位價」當參考，只留低於中位價者
   let averagePrice = null;
   if (opts.requireBelowAverage !== false && kept.length) {
     const s = summarize(kept.map((l) => l.price), {
@@ -293,12 +302,12 @@ function buildDealEmbed(query, deal, baseline, currency) {
   const l = deal.listing;
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71)
-    .setTitle('🟢 甜甜價！低於歷史平均價')
+    .setTitle('🟢 甜甜價！低於歷史中位價')
     .setDescription(`**${l.title || '（無標題）'}**`)
     .addFields(
       { name: '搜尋關鍵字', value: query || '（未指定）', inline: false },
       { name: '當前價格', value: formatMoney(deal.price, currency), inline: true },
-      { name: '歷史平均價', value: formatMoney(baseline, currency), inline: true },
+      { name: '歷史中位價', value: formatMoney(baseline, currency), inline: true },
       { name: '折扣幅度', value: `${formatPct(deal.discountPct)}（省 ${formatMoney(deal.delta, currency)}）`, inline: true },
     )
     .setTimestamp();
@@ -321,7 +330,7 @@ function buildSearchEmbed(query, cheapest, stats, currency, totalCount) {
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle(`🔍 搜尋結果：${query}`)
-    .setDescription(`共 ${totalCount} 筆在售商品；歷史平均價 ${formatMoney(stats.baseline, currency)}（樣本 ${stats.usedCount} 筆）`)
+    .setDescription(`共 ${totalCount} 筆在售商品；歷史中位價 ${formatMoney(stats.baseline, currency)}（樣本 ${stats.usedCount} 筆）`)
     .setTimestamp();
 
   if (!cheapest.length) {
@@ -345,7 +354,7 @@ function buildRareEmbed(keyword, rare, currency, totalCount, info = {}) {
     else if (min != null) parts.push(`價格 $${min} 以上`);
     else if (max != null) parts.push(`價格 $${max} 以下`);
   }
-  if (info.averagePrice) parts.push(`在售平均價 ${formatMoney(info.averagePrice, currency)}（僅顯示低於平均價者）`);
+  if (info.averagePrice) parts.push(`在售中位價 ${formatMoney(info.averagePrice, currency)}（僅顯示低於中位價者）`);
   parts.push(`共 ${totalCount} 筆符合（依價格最高排序）`);
 
   const embed = new EmbedBuilder()
@@ -355,7 +364,7 @@ function buildRareEmbed(keyword, rare, currency, totalCount, info = {}) {
     .setTimestamp();
 
   if (!rare.length) {
-    embed.setDescription('找不到符合條件的卡片（可能被價格區間／平均價過濾掉）。');
+    embed.setDescription('找不到符合條件的卡片（可能被價格區間／中位價過濾掉）。');
     return embed;
   }
 
@@ -384,7 +393,7 @@ async function handleSearch(message, keyword, client) {
     const embed = buildSearchEmbed(keyword, res.cheapest, res.stats, res.targetCurrency, res.kept.length);
     await loading.edit({ content: null, embeds: [embed] });
 
-    // 若搜尋發現低於歷史平均價的甜甜價，即時回覆指令所在的頻道
+    // 若搜尋發現低於歷史中位價的甜甜價，即時回覆指令所在的頻道
     if (res.deals.length) {
       const dealsToShow = res.deals.slice(0, 3);
       for (const deal of dealsToShow) {
@@ -468,7 +477,7 @@ async function handleHelp(message) {
   await message.reply([
     '**eBay 卡價監測 Bot 指令**',
     '`!search <關鍵字>` — 即時搜尋 eBay，回傳最平前 5 筆卡片',
-    '`!rare <關鍵字> [價格範圍]` — 搜尋 /99 以下高稀缺卡片，且低於在售平均價；範圍可用 100-500 / 500+ / -500 或 cheap/mid/high/premium',
+    '`!rare <關鍵字> [價格範圍]` — 搜尋 /99 以下高稀缺卡片，且低於在售中位價；範圍可用 100-500 / 500+ / -500 或 cheap/mid/high/premium',
     '`!add <關鍵字>` — 把關鍵字加入「本頻道」的背景輪詢監測清單（寫入 presets.json）',
     '`!list` — 顯示目前監測中的關鍵字清單',
     '`!help` — 顯示本說明',

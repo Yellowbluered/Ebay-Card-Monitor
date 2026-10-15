@@ -186,6 +186,45 @@ function matchesAnyKeyword(title, keywords) {
   return keywords.some((k) => haystack.includes(k));
 }
 
+/** 簽名標記（含 Signature / Signed / Sign / Sig 等變體） */
+const AUTO_MARKERS = ['auto', 'autograph', 'autographed', "auto'd", 'signature', 'signed', 'sign', 'sig'];
+
+/** 「One of One / 1 of 1」極稀缺平行（等同 1/1） */
+const ONE_OF_ONE_RE = /\b(?:one\s*of\s*one|1\s*of\s*1|one\s*of\s*1|1\s*of\s*one)\b/i;
+
+/** 低編號限量分母集合（對齊 Python 版 SERIAL_PRINT_RUNS） */
+const SERIAL_PRINT_RUNS = new Set([1, 5, 10, 25, 49, 50, 75, 99]);
+
+/**
+ * 以「原始標題文字」判斷是否含限量 / 簽名訊號（防呆）。
+ * 涵蓋：Auto / Signature / Signed / Sign / Sig、1/1 / One of One / 1 of 1、低編號 /5 /10 /25 …
+ */
+function titleHasScarcitySignal(title) {
+  if (!title) return false;
+  const lower = String(title).toLowerCase();
+  const tokens = lower.match(/[a-z0-9'/]+/g) || [];
+  if (tokens.some((t) => AUTO_MARKERS.includes(t))) return true;
+  if (ONE_OF_ONE_RE.test(lower)) return true;
+  const serials = lower.match(/\/(\d{1,4})/g) || [];
+  for (const s of serials) {
+    const denom = parseInt(s.slice(1), 10);
+    if (SERIAL_PRINT_RUNS.has(denom)) return true;
+  }
+  return false;
+}
+
+/**
+ * 查詢關鍵字本身不含限量/簽名訊號時，視為普卡查詢。
+ * 會先移除 eBay 負向排除詞（-auto、-/10 …），因為那代表「排除」而非「我要找」。
+ */
+function queryIsBase(query) {
+  const positive = String(query || '')
+    .split(/\s+/)
+    .filter((t) => t && !t.startsWith('-'))
+    .join(' ');
+  return !titleHasScarcitySignal(positive);
+}
+
 module.exports = {
   CURRENCY_SYMBOLS,
   MARKETPLACE_DOMAINS,
@@ -199,4 +238,6 @@ module.exports = {
   cleanItemUrl,
   toKeywordList,
   matchesAnyKeyword,
+  titleHasScarcitySignal,
+  queryIsBase,
 };

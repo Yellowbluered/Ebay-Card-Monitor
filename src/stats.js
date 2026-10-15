@@ -3,7 +3,7 @@
 /**
  * 價格統計：平均價、中位數、修剪平均、IQR 離群值過濾。
  * 集換式卡牌價格分布非常偏斜（同一張卡可以 $20 也可以 $5000），
- * 所以預設先用 Tukey IQR 濾掉極端值，再算平均價，避免平均價被灌水。
+ * 所以預設先用 Tukey IQR 濾掉極端值，再取中位數，避免基準價被灌水。
  */
 
 function sum(values) {
@@ -61,13 +61,13 @@ function iqrBounds(values, k = 1.5) {
 /**
  * @param {number[]} values 價格陣列
  * @param {object} options
- * @param {'mean'|'median'|'trimmed'} [options.baseline] 用哪個當「平均價」基準
+ * @param {'mean'|'median'|'trimmed'} [options.baseline] 用哪個當基準（預設 median 中位數）
  * @param {number} [options.trim] 修剪比例（baseline=trimmed 時使用）
  * @param {boolean} [options.outlierFilter] 是否用 IQR 濾離群值
  * @param {number} [options.iqrK] IQR 倍數，預設 1.5
  */
 function summarize(values, options = {}) {
-  const { baseline = 'mean', trim = 0.1, outlierFilter = true, iqrK = 1.5 } = options;
+  const { baseline = 'median', trim = 0.1, outlierFilter = true, iqrK = 1.5 } = options;
 
   const all = values.filter((v) => Number.isFinite(v) && v > 0);
   const bounds = iqrBounds(all, iqrK);
@@ -125,7 +125,7 @@ function summarize(values, options = {}) {
   };
 }
 
-/** 相對基準價的折扣百分比（正值 = 比平均便宜） */
+/** 相對基準價的折扣百分比（正值 = 比基準便宜） */
 function discountPercent(price, baseline) {
   if (!Number.isFinite(price) || !Number.isFinite(baseline) || baseline <= 0) return 0;
   return ((baseline - price) / baseline) * 100;

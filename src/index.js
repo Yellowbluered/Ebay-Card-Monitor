@@ -400,7 +400,7 @@ eBay 卡牌價格掃描器 — 找出「在售（未售出）」且價格 <= 平
   --limit 200                                 取幾筆「在售」商品（Browse API 單次上限 200）
   --pages 1                                   API = 抓幾批；scrape = 翻幾頁
   --top 25                                    最多列出幾筆甜甜價（0 = 全部）
-  --baseline mean|median|trimmed              平均價基準（預設 mean，且已先濾離群值）
+  --baseline mean|median|trimmed              基準價（預設 median 中位數，且已先濾離群值）
   --trim 0.1                                  baseline=trimmed 時的修剪比例
   --no-outlier-filter                         關閉 IQR 離群值過濾
   --iqr-k 1.5                                 IQR 倍數
@@ -495,7 +495,7 @@ function buildConfig(argv) {
     limit: Math.max(1, Math.min(num(args.limit, num(p.limit, 200)), 200)),
     pages: Math.max(1, num(args.pages, num(p.pages, 1))),
     top: Math.max(0, num(args.top, 25)),
-    baseline: str(args.baseline, 'mean').toLowerCase(),
+    baseline: str(args.baseline, 'median').toLowerCase(),
     trim: num(args.trim, 0.1),
     outlierFilter: bool(args.outlierFilter, true),
     iqrK: num(args.iqrK, 1.5),
@@ -530,7 +530,7 @@ function buildConfig(argv) {
  * 4. 價格統計（原 src/stats.js）
  *    平均價、中位數、修剪平均、IQR 離群值過濾。
  *    集換式卡牌價格分布非常偏斜（同一張卡可以 $20 也可以 $5000），
- *    所以預設先用 Tukey IQR 濾掉極端值，再算平均價，避免平均價被灌水。
+ *    所以預設先用 Tukey IQR 濾掉極端值，再取中位數，避免基準價被灌水。
  * ═══════════════════════════════════════════════════════════════════ */
 
 function sum(values) {
@@ -588,13 +588,13 @@ function iqrBounds(values, k = 1.5) {
 /**
  * @param {number[]} values 價格陣列
  * @param {object} options
- * @param {'mean'|'median'|'trimmed'} [options.baseline] 用哪個當「平均價」基準
+ * @param {'mean'|'median'|'trimmed'} [options.baseline] 用哪個當基準（預設 median 中位數）
  * @param {number} [options.trim] 修剪比例（baseline=trimmed 時使用）
  * @param {boolean} [options.outlierFilter] 是否用 IQR 濾離群值
  * @param {number} [options.iqrK] IQR 倍數，預設 1.5
  */
 function summarize(values, options = {}) {
-  const { baseline = 'mean', trim = 0.1, outlierFilter = true, iqrK = 1.5 } = options;
+  const { baseline = 'median', trim = 0.1, outlierFilter = true, iqrK = 1.5 } = options;
 
   const all = values.filter((v) => Number.isFinite(v) && v > 0);
   const bounds = iqrBounds(all, iqrK);
@@ -652,7 +652,7 @@ function summarize(values, options = {}) {
   };
 }
 
-/** 相對基準價的折扣百分比（正值 = 比平均便宜） */
+/** 相對基準價的折扣百分比（正值 = 比基準便宜） */
 function discountPercent(price, baseline) {
   if (!Number.isFinite(price) || !Number.isFinite(baseline) || baseline <= 0) return 0;
   return ((baseline - price) / baseline) * 100;
@@ -775,7 +775,7 @@ function renderSummary({ cfg, stats, meta }) {
   const cur = meta.currency || cfg.currency || 'USD';
   const lines = [];
   lines.push('═'.repeat(72));
-  lines.push('  eBay 卡牌價格掃描 — 找出在售且低於平均價的甜甜價');
+  lines.push('  eBay 卡牌價格掃描 — 找出在售且低於基準價的甜甜價');
   lines.push('═'.repeat(72));
   lines.push(`  搜尋關鍵字   : ${cfg.query}`);
   lines.push(`  資料來源     : ${meta.sourceLabel}`);
@@ -787,7 +787,7 @@ function renderSummary({ cfg, stats, meta }) {
   if (meta.otherCurrencies) lines.push(`  其他幣別略過 : ${meta.otherCurrencies} 筆`);
   lines.push('');
   lines.push(`  有效樣本     : ${stats.usedCount} 筆${stats.removed ? `（IQR 濾除 ${stats.removed} 筆離群值）` : ''}`);
-  lines.push(`  ── 平均價基準（${stats.baselineKind === 'mean' ? '平均價' : stats.baselineKind === 'median' ? '中位數' : '修剪平均'}）: ${formatMoney(stats.baseline, cur)}`);
+  lines.push(`  ── 基準價（${stats.baselineKind === 'mean' ? '平均價' : stats.baselineKind === 'median' ? '中位數' : '修剪平均'}）: ${formatMoney(stats.baseline, cur)}`);
   lines.push(`  平均價       : ${formatMoney(stats.mean, cur)}`);
   lines.push(`  中位數       : ${formatMoney(stats.median, cur)}`);
   lines.push(`  修剪平均     : ${formatMoney(stats.trimmedMean, cur)}`);
@@ -805,7 +805,7 @@ function renderSummary({ cfg, stats, meta }) {
   }
   lines.push('');
   lines.push(
-    `  ✅ 符合「<= 平均價${cfg.minDiscount > 0 ? ` 且低於 ${cfg.minDiscount}% 以上` : ''}」: ${meta.dealCount} 筆`
+    `  ✅ 符合「<= 基準價${cfg.minDiscount > 0 ? ` 且低於 ${cfg.minDiscount}% 以上` : ''}」: ${meta.dealCount} 筆`
   );
   lines.push('═'.repeat(72));
   return lines.join('\n');
@@ -815,12 +815,12 @@ function renderSummary({ cfg, stats, meta }) {
 function renderDeals(deals, stats, cfg) {
   const cur = cfg.currency || deals[0]?.listing.currency || 'USD';
   if (!deals.length) {
-    return '\n（沒有找到 <= 平均價的商品，可嘗試放寬 --min-price/--max-price 或加大 --limit。）\n';
+    return '\n（沒有找到 <= 基準價的商品，可嘗試放寬 --min-price/--max-price 或加大 --limit。）\n';
   }
 
   const showSold = deals.some((d) => Number.isFinite(d.listing.soldVsPct));
 
-  const headers = ['#', '標題', '價格', '折扣', '比平均便宜', '商品連結'];
+  const headers = ['#', '標題', '價格', '折扣', '比基準便宜', '商品連結'];
   if (cfg.sellerInfo) headers.push('賣家', '運費');
   if (showSold) headers.push('vs 成交');
 
