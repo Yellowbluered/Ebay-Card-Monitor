@@ -50,9 +50,12 @@ GRADING_COMPANIES = {
 # 裸卡 / 未評級標記
 RAW_MARKERS = {"raw", "ungraded", "un-graded", "unslabbed", "裸卡"}
 
-# 簽名標記（含 Signature / Signed / Sign / Sig 等變體，避免普卡基準價混入簽名卡）
+# 簽名標記（含 Signature / Signed / Sign / Sig、PSA/DNA 認證等變體，避免普卡基準價混入簽名卡）
 AUTO_MARKERS = {"auto", "autograph", "autographed", "auto'd",
-                "signature", "signed", "sign", "sig"}
+                "signature", "signed", "sign", "sig", "dna", "psa/dna"}
+
+# 簽名/認證多字片語（需整段字串比對，避免只靠 token 拆解而漏判，如 PSA AUTO 10）
+AUTO_PHRASE_MARKERS = {"psa auto", "auto 10"}
 
 # 「One of One / 1 of 1」極稀缺平行（等同 1/1）；正規化成「1/1」讓 token 解析視為限量。
 # 這樣普卡（Base）計算歷史基準價時，才能把 1/1 這類極稀缺成交紀錄嚴格排除。
@@ -387,17 +390,20 @@ def title_has_scarcity_signal(title: str) -> bool:
 
     不依賴結構化解析結果，直接掃標題，涵蓋：
       * 簽名：auto / autograph / signature / signed / sign / sig
+      * 簽名/認證：dna / psa/dna / psa auto / auto 10
       * 極稀缺：1/1、one of one、1 of 1
       * 低編號限量：/1、/5、/10、/25、/49、/50、/75、/99 …（對齊 SERIAL_PRINT_RUNS）
 
     用途：普卡基準價計算前，把帶有這些訊號的成交紀錄嚴格排除，
-    避免 Auto / 簽名 / 1 of 1 / 低編號平行把普卡歷史價拉高。
+    避免 Auto / 簽名 / PSA/DNA / 1 of 1 / 低編號平行把普卡歷史價拉高。
     """
     if not title:
         return False
     lower = str(title).lower()
     tokens = set(re.findall(r"[a-z0-9'/]+", lower))
     if tokens & AUTO_MARKERS:
+        return True
+    if any(p in lower for p in AUTO_PHRASE_MARKERS):
         return True
     if ONE_OF_ONE_RE.search(lower):
         return True

@@ -215,7 +215,7 @@ async function scanFor(keyword, opts = {}) {
   }
 
   // 普卡防呆：查詢關鍵字本身不含限量/簽名訊號（視為普卡）時，
-  // 排除標題含 Auto / Signature / 1/1 / One of One / 低編號 的限量與簽名 listing，
+  // 排除標題含 Auto / Signature / PSA/DNA / PSA Auto 10 / 1/1 / One of One / 低編號 的限量與簽名 listing，
   // 避免把限量卡、簽名卡混入普卡基準價（中位數）而拉高基準。
   if (opts.excludeScarce !== false && queryIsBase(keyword)) {
     const before = kept.length;
