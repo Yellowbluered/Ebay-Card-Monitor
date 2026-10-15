@@ -20,6 +20,11 @@ _debug/
 _probe*
 *.log
 
+# ── Python / SQLite（位元組碼與本地快取，絕對不可提交）────────
+__pycache__/
+*.py[cod]
+*.db
+
 # ── Playwright ────────────────────────────────────────────────
 test-results/
 playwright-report/
