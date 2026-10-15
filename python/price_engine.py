@@ -20,7 +20,7 @@ from collections import Counter
 from dataclasses import asdict
 from typing import List, Optional, Tuple
 
-from card_parser import parse_card_title, strict_match
+from card_parser import is_base_card, parse_card_title, strict_match, title_has_scarcity_signal
 from db import CardDatabase
 from ebay_api import EbayBrowseApi
 from ebay_sold_scraper import (
@@ -283,9 +283,16 @@ def get_baseline(features: CardFeature, settings, log=None) -> dict:
             raise
 
         # 3) 嚴格比對（模組 D）：只留特徵完全吻合的成交紀錄
+        #    普卡防呆：查詢目標為普卡（無簽名 / 非限量）時，先以原始標題排除
+        #    Auto / Signature / 1/1 / One of One / 低編號 等限量與簽名成交紀錄，
+        #    避免把限量卡、簽名卡混入普卡歷史基準價。
+        target_is_base = is_base_card(features)
         matched: List[SoldRecord] = []
         rejected = 0
         for rec in sold_records:
+            if target_is_base and title_has_scarcity_signal(rec.title):
+                rejected += 1
+                continue
             candidate = parse_card_title(rec.title, settings)
             ok, _ = strict_match(features, candidate)
             if ok:

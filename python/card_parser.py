@@ -50,8 +50,16 @@ GRADING_COMPANIES = {
 # 裸卡 / 未評級標記
 RAW_MARKERS = {"raw", "ungraded", "un-graded", "unslabbed", "裸卡"}
 
-# 簽名標記
-AUTO_MARKERS = {"auto", "autograph", "autographed", "auto'd"}
+# 簽名標記（含 Signature / Signed / Sign / Sig 等變體，避免普卡基準價混入簽名卡）
+AUTO_MARKERS = {"auto", "autograph", "autographed", "auto'd",
+                "signature", "signed", "sign", "sig"}
+
+# 「One of One / 1 of 1」極稀缺平行（等同 1/1）；正規化成「1/1」讓 token 解析視為限量。
+# 這樣普卡（Base）計算歷史基準價時，才能把 1/1 這類極稀缺成交紀錄嚴格排除。
+ONE_OF_ONE_RE = re.compile(
+    r"\b(?:one\s*of\s*one|1\s*of\s*1|one\s*of\s*1|1\s*of\s*one)\b",
+    re.IGNORECASE,
+)
 
 # 平行/編號版本關鍵字（單一 token，小寫）。
 # 注意：不含 prizm/optic/mosaic 等「既是系列又是平行」的歧義詞，
@@ -145,6 +153,8 @@ def regex_parse_card_title(title: str) -> CardFeature:
     text = _clean_title(title)
     if not text:
         return feature
+    # 「One of One / 1 of 1」先正規化成「1/1」，讓後續 token 解析視為極稀缺限量（1/1）
+    text = ONE_OF_ONE_RE.sub("1/1", text)
     lower = text.lower()
 
     # 1) 先移除「系列多字片語」（最長優先），避免 "base set" 被拆成 parallel "base"
@@ -363,6 +373,40 @@ def _canonical_parallel(s) -> str:
     return ",".join(sorted(toks))
 
 
+def is_base_card(feature: CardFeature) -> bool:
+    """判斷是否為普卡（無簽名且非限量/平行/編號）。
+
+    供 price_engine 在計算「普卡歷史基準價」時，先行判斷查詢目標是否為普卡；
+    若是，則對成交標題套用 title_has_scarcity_signal 第二道防呆。
+    """
+    return (not feature.is_autograph) and _canonical_parallel(feature.parallel_or_serial) == ""
+
+
+def title_has_scarcity_signal(title: str) -> bool:
+    """以「原始標題文字」判斷是否含限量 / 簽名訊號（第二道防呆）。
+
+    不依賴結構化解析結果，直接掃標題，涵蓋：
+      * 簽名：auto / autograph / signature / signed / sign / sig
+      * 極稀缺：1/1、one of one、1 of 1
+      * 低編號限量：/1、/5、/10、/25、/49、/50、/75、/99 …（對齊 SERIAL_PRINT_RUNS）
+
+    用途：普卡基準價計算前，把帶有這些訊號的成交紀錄嚴格排除，
+    避免 Auto / 簽名 / 1 of 1 / 低編號平行把普卡歷史價拉高。
+    """
+    if not title:
+        return False
+    lower = str(title).lower()
+    tokens = set(re.findall(r"[a-z0-9'/]+", lower))
+    if tokens & AUTO_MARKERS:
+        return True
+    if ONE_OF_ONE_RE.search(lower):
+        return True
+    for m in re.finditer(r"/(\d{1,4})", lower):
+        if int(m.group(1)) in SERIAL_PRINT_RUNS:
+            return True
+    return False
+
+
 def strict_match(target: CardFeature, candidate: CardFeature) -> Tuple[bool, List[str]]:
     """判斷 candidate（成交紀錄）是否與 target（查詢卡）為「同一款卡」。
 
@@ -370,7 +414,7 @@ def strict_match(target: CardFeature, candidate: CardFeature) -> Tuple[bool, Lis
       1. 身份 token（球員 ∪ 系列）集合必須完全相等（順序無關）。
       2. 平行/編號必須完全相等（Base 與未標示視為相同）→ 嚴禁 /10 與普卡混用。
       3. 年份 / 卡號 / 評級 / 分數：target 有指定就必須完全相等。
-      4. target 指定 Auto 時，candidate 也必須是 Auto。
+      4. 簽名雙向隔離：普卡（無簽）與簽名卡不得混用，反之亦然。
 
     回傳 (是否吻合, 不吻合原因清單)。
     """
@@ -393,7 +437,8 @@ def strict_match(target: CardFeature, candidate: CardFeature) -> Tuple[bool, Lis
         if _norm(tval) and _norm(tval) != _norm(cval):
             reasons.append(field)
 
-    if target.is_autograph and not candidate.is_autograph:
+    # 雙向隔離：普卡基準價排除簽名卡成交紀錄；簽名卡基準價亦排除普卡成交紀錄。
+    if target.is_autograph != candidate.is_autograph:
         reasons.append("is_autograph")
 
     return (not reasons), reasons
