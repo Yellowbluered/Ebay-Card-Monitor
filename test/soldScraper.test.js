@@ -6,8 +6,7 @@ const assert = require('node:assert');
 const {
   EbaySoldScraper,
   ExternalQuotaExhaustedError,
-  isQuotaExhausted,
-  resetQuotaExhausted,
+  ScraperBlockedError,
 } = require('../src/soldScraper');
 
 const SOLD_HTML = `
@@ -108,8 +107,7 @@ test('_looksBlocked 偵測阻擋頁', () => {
   assert.strictEqual(s._looksBlocked('<html>normal ebay</html>'), false);
 });
 
-test('fetchSold：一家失敗時 failover 到另一家', async () => {
-  resetQuotaExhausted();
+test('fetchSold：一家 429 時 failover 到另一家', async () => {
   const s = new EbaySoldScraper({
     marketplace: 'EBAY_US',
     scrapingdogApiKey: 'dog',
@@ -135,20 +133,49 @@ test('fetchSold：一家失敗時 failover 到另一家', async () => {
   const recs = await s.fetchSold('x psa 10', 1);
   assert.strictEqual(recs.length, 1);
   assert.strictEqual(recs[0].source, 'serpapi');
-  assert.strictEqual(isQuotaExhausted(), false);
 });
 
-test('fetchSold：兩家皆失敗 → ExternalQuotaExhaustedError + 熔斷', async () => {
-  resetQuotaExhausted();
+test('fetchSold：兩家皆 401/429 → ExternalQuotaExhaustedError（不鎖死）', async () => {
   const s = new EbaySoldScraper({
     marketplace: 'EBAY_US',
     scrapingdogApiKey: 'dog',
     serpapiApiKey: 'serp',
     scraperDelayMin: 0,
     scraperDelayMax: 0,
-    fetchImpl: async () => fakeResponse({ status: 402, headers: { 'content-type': 'application/json' }, json: {} }),
+    fetchImpl: async () => fakeResponse({ status: 429, headers: { 'content-type': 'application/json' }, json: { message: 'quota' } }),
   });
   await assert.rejects(() => s.fetchSold('x psa 10', 1), ExternalQuotaExhaustedError);
-  assert.strictEqual(isQuotaExhausted(), true);
-  resetQuotaExhausted();
+});
+
+test('fetchSold：兩家皆暫時性錯誤（非額度）→ ScraperBlockedError', async () => {
+  const s = new EbaySoldScraper({
+    marketplace: 'EBAY_US',
+    scrapingdogApiKey: 'dog',
+    serpapiApiKey: 'serp',
+    scraperDelayMin: 0,
+    scraperDelayMax: 0,
+    fetchImpl: async () => fakeResponse({ status: 500, headers: { 'content-type': 'text/html' }, body: 'server error' }),
+  });
+  await assert.rejects(() => s.fetchSold('x psa 10', 1), ScraperBlockedError);
+});
+
+test('fetchSold：兩家皆查無結果（0 筆）→ 回傳空陣列而非額度錯誤', async () => {
+  const s = new EbaySoldScraper({
+    marketplace: 'EBAY_US',
+    scrapingdogApiKey: 'dog',
+    serpapiApiKey: 'serp',
+    scraperDelayMin: 0,
+    scraperDelayMax: 0,
+    fetchImpl: async (url) => {
+      if (url.includes('scrapingdog.com')) {
+        return fakeResponse({ status: 200, headers: { 'content-type': 'text/html' }, body: '<ul class="srp-results"></ul>' });
+      }
+      if (url.includes('serpapi.com')) {
+        return fakeResponse({ json: { organic_results: [] } });
+      }
+      throw new Error('unexpected url ' + url);
+    },
+  });
+  const recs = await s.fetchSold('x psa 10', 1);
+  assert.deepStrictEqual(recs, []);
 });
