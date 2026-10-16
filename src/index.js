@@ -1971,15 +1971,26 @@ async function collectListings(cfg, log = () => {}) {
   };
 }
 
-/** 抓「已售出」清單，供成交價基準用（爬蟲版，獨立於在售資料來源） */
+/** 抓「已售出」清單，供成交價基準用（外部 API：ScrapingDog / SerpApi，零本機瀏覽器） */
 async function collectSoldListings(cfg, log = () => {}) {
-  const { name, label, mod } = pickScraper(cfg.scraperEngine);
-  log(`  [成交基準] 引擎：${label}（抓 ${cfg.soldPages} 頁已售出商品）`);
-  const result = await mod.scrapeSearch(cfg, log, { sold: true, pages: cfg.soldPages });
+  const { EbaySoldScraper } = require('./soldScraper');
+  const scraper = new EbaySoldScraper(
+    {
+      marketplace: cfg.marketplace,
+      scrapingdogApiKey: process.env.SCRAPINGDOG_API_KEY || '',
+      serpapiApiKey: process.env.SERPAPI_API_KEY || '',
+      externalScraperUrl: process.env.EXTERNAL_SCRAPER_URL || '',
+    },
+    log
+  );
+  log(`  [成交基準] 外部 API（ScrapingDog / SerpApi 輪替 + 容錯切換，抓 ${cfg.soldPages} 頁已售出商品）`);
+  const listings = await scraper.fetchSold(cfg.query, cfg.soldPages);
   return {
-    ...result,
-    engine: name,
-    sourceLabel: `${label}（已售出，marketplace=${cfg.marketplace}）`,
+    listings,
+    total: listings.length,
+    source: 'external',
+    engine: 'external',
+    sourceLabel: `外部 Scraper（已售出，marketplace=${cfg.marketplace}）`,
   };
 }
 
@@ -2131,7 +2142,7 @@ async function main() {
   let soldBenchmark = null;
   if (cfg.soldRef && !cfg.demo) {
     if (cfg.resolvedSource !== 'scrape') {
-      log('⚠ --sold-ref 目前以爬蟲抓取「已售出」當基準；你正走 API 模式，仍會另外開爬蟲抓成交價（需已裝 playwright/puppeteer）。');
+      log('⚠ --sold-ref 會以外部 Sold API（ScrapingDog / SerpApi）抓取「已售出」當成交基準。');
     }
     try {
       const soldCollected = await collectSoldListings(cfg, log);

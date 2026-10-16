@@ -195,19 +195,38 @@ const AUTO_PHRASE_MARKERS = ['psa auto', 'auto 10'];
 /** 「One of One / 1 of 1」極稀缺平行（等同 1/1） */
 const ONE_OF_ONE_RE = /\b(?:one\s*of\s*one|1\s*of\s*1|one\s*of\s*1|1\s*of\s*one)\b/i;
 
-/** 低編號限量分母集合（對齊 Python 版 SERIAL_PRINT_RUNS） */
-const SERIAL_PRINT_RUNS = new Set([1, 5, 10, 25, 49, 50, 75, 99]);
+/** 常見「/N 限量編號」分母集合（對齊 Python 版 SERIAL_PRINT_RUNS，含中高編號平行，補齊 /199 /299 /399 …） */
+const SERIAL_PRINT_RUNS = new Set([
+  1, 5, 10, 15, 20, 25, 35, 45, 49, 50, 65, 75, 99, 100, 125, 149,
+  150, 175, 199, 200, 250, 299, 300, 350, 399, 400, 500,
+]);
+
+/**
+ * 平行 / 顏色 / 樣式「單一 token」稀缺標記（第二道防呆）。
+ * 注意：不含「base」——base 正是普卡本體，不是稀缺訊號。
+ */
+const PARALLEL_MARKERS = new Set([
+  'refractor', 'x-fractor', 'fractor', 'silver', 'gold', 'holo', 'holofoil',
+  'reverse', 'mojo', 'pulsar', 'velocity', 'disco', 'hyper', 'wave', 'atomic',
+  'sepia', 'negative', 'pink', 'blue', 'green', 'red', 'purple', 'orange',
+  'yellow', 'teal', 'cracked', 'ice', 'diamond', 'rainbow', 'checkerboard',
+  'numbered', 'serial', 'jersey', 'relic', 'patch', 'tiger', 'zebra',
+  'galactic', 'nebula', 'shimmer', 'sparkle', 'retro', 'throwback', 'logo',
+  'variation', 'sp', 'ssp', 'insert', 'stained', 'glass', 'white',
+]);
 
 /**
  * 以「原始標題文字」判斷是否含限量 / 簽名訊號（防呆）。
  * 涵蓋：Auto / Signature / Signed / Sign / Sig、PSA/DNA、PSA Auto 10、
- *       1/1 / One of One / 1 of 1、低編號 /5 /10 /25 …
+ *       1/1 / One of One / 1 of 1、低編號 /5 /10 /25 /199 …、
+ *       平行/顏色/樣式（Refractor / Silver / Gold / Red / Mojo / Rainbow …）。
  */
 function titleHasScarcitySignal(title) {
   if (!title) return false;
   const lower = String(title).toLowerCase();
   const tokens = lower.match(/[a-z0-9'/]+/g) || [];
   if (tokens.some((t) => AUTO_MARKERS.includes(t))) return true;
+  if (tokens.some((t) => PARALLEL_MARKERS.has(t))) return true;
   if (AUTO_PHRASE_MARKERS.some((p) => lower.includes(p))) return true;
   if (ONE_OF_ONE_RE.test(lower)) return true;
   const serials = lower.match(/\/(\d{1,4})/g) || [];

@@ -219,6 +219,13 @@ function buildConfig(argv) {
     browserChannel: str(args.browserChannel, str(process.env.SCRAPER_CHANNEL, '')) || null,
     delayMs: num(args.delay, num(process.env.SCRAPER_DELAY_MS, 1500)),
     scraperHeadless: bool(process.env.SCRAPER_HEADLESS, true),
+    // 已售成交價（外部 API，零本機瀏覽器）
+    scrapingdogApiKey: str(process.env.SCRAPINGDOG_API_KEY, '') || null,
+    serpapiApiKey: str(process.env.SERPAPI_API_KEY, '') || null,
+    externalScraperUrl: str(process.env.EXTERNAL_SCRAPER_URL, '') || null,
+    soldCacheTtlDays: Math.max(1, num(process.env.SOLD_CACHE_TTL_DAYS, 7)),
+    scraperDelayMin: num(process.env.SCRAPER_DELAY_MIN, 1),
+    scraperDelayMax: num(process.env.SCRAPER_DELAY_MAX, 2),
     // API 相關
     ebayEnv: str(process.env.EBAY_ENV, 'production').toLowerCase(),
   };

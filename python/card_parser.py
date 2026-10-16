@@ -80,7 +80,14 @@ PARALLEL_KEYWORDS = {
 
 # 用來判斷「N/D」是「限量編號」還是「卡號/總張數」的分母集合。
 # 例：4/10 → 限量 10 張（平行/編號）；4/102 → 卡號 4、全套 102 張（卡號）。
-SERIAL_PRINT_RUNS = {1, 5, 10, 25, 49, 50, 75, 99}
+# 已補齊中高編號平行（/149、/199、/299、/399 …），避免高價平行逃過普卡防呆。
+SERIAL_PRINT_RUNS = {1, 5, 10, 15, 20, 25, 35, 45, 49, 50, 65, 75, 99,
+                     100, 125, 149, 150, 175, 199, 200, 250, 299, 300,
+                     350, 399, 400, 500}
+
+# 平行/顏色/樣式「單一 token」稀缺標記（供 title_has_scarcity_signal 第二道防呆）。
+# 注意：不含 "base"（base 即普卡本體，不是稀缺訊號）。
+PARALLEL_MARKERS = PARALLEL_KEYWORDS - {"base"}
 
 # 系列「多字片語」（最長優先移除），避免 "base set" 被拆成 parallel "base"。
 KNOWN_SET_PHRASES = [
@@ -402,6 +409,8 @@ def title_has_scarcity_signal(title: str) -> bool:
     lower = str(title).lower()
     tokens = set(re.findall(r"[a-z0-9'/]+", lower))
     if tokens & AUTO_MARKERS:
+        return True
+    if tokens & PARALLEL_MARKERS:
         return True
     if any(p in lower for p in AUTO_PHRASE_MARKERS):
         return True

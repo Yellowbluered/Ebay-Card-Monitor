@@ -84,11 +84,13 @@ async function launchBrowser(puppeteer, cfg) {
  * @param {object} cfg 由 buildConfig() 產生
  * @param {(msg: string) => void} log
  */
-async function scrapeSearch(cfg, log = () => {}) {
+async function scrapeSearch(cfg, log = () => {}, opts = {}) {
   const puppeteer = loadPuppeteerStack();
   const started = Date.now();
   const seen = new Set();
   const listings = [];
+  const pages = Number.isFinite(opts.pages) && opts.pages > 0 ? opts.pages : cfg.pages;
+  const sold = Boolean(opts.sold);
   let browser = null;
 
   log(
@@ -127,14 +129,15 @@ async function scrapeSearch(cfg, log = () => {}) {
       .catch(() => {});
     await sleep(Math.max(cfg.delayMs, 800));
 
-    for (let pageNumber = 1; pageNumber <= cfg.pages; pageNumber += 1) {
+    for (let pageNumber = 1; pageNumber <= pages; pageNumber += 1) {
       const url = buildSearchUrl({
         query: cfg.query,
         marketplace: cfg.marketplace,
         pageNumber,
         buyItNowOnly: cfg.buying !== 'all' && cfg.buying !== 'auction',
+        sold,
       });
-      log(`  [Scrape] 第 ${pageNumber}/${cfg.pages} 頁：${url}`);
+      log(`  [Scrape] 第 ${pageNumber}/${pages} 頁${sold ? '（已售出）' : ''}：${url}`);
 
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       const status = response ? response.status() : 0;
@@ -193,7 +196,7 @@ async function scrapeSearch(cfg, log = () => {}) {
       log(`  [Scrape] 新增 ${added} 筆（累計 ${listings.length} 筆）`);
 
       if (added === 0) break; // 沒東西了，不用再翻
-      if (pageNumber < cfg.pages) await sleep(cfg.delayMs);
+      if (pageNumber < pages) await sleep(cfg.delayMs);
     }
   } finally {
     if (browser) await browser.close().catch(() => {});

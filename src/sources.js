@@ -1,6 +1,8 @@
 'use strict';
 
 const { EbayBrowseApi, EbayApiError } = require('./ebayApi');
+const { EbaySoldScraper, ExternalQuotaExhaustedError, isQuotaExhausted } = require('./soldScraper');
+const { SoldCache } = require('./soldCache');
 
 /**
  * 可用的爬蟲引擎。
@@ -79,4 +81,41 @@ async function collectListings(cfg, log = () => {}) {
   };
 }
 
-module.exports = { collectListings, pickScraper };
+/** 抓「已售出」清單，供「歷史中位成交價」基準用（外部 API + 7 天快取，零本機瀏覽器） */
+async function collectSoldListings(cfg, log = () => {}, pages = 2) {
+  const cache = new SoldCache(undefined, cfg.soldCacheTtlDays || 7);
+
+  // 熔斷：兩家外部 Sold API 額度皆耗盡 → 直接拋出，讓呼叫端降級查在售
+  if (isQuotaExhausted()) {
+    throw new ExternalQuotaExhaustedError('外部 Sold API 額度已耗盡（熔斷中），本次略過。');
+  }
+
+  const cached = cache.get(cfg.query || '');
+  if (cached && Array.isArray(cached.records)) {
+    log(`  [成交基準] 命中 7 天成交價快取（${cached.records.length} 筆），不發外部請求。`);
+    return {
+      listings: cached.records,
+      total: cached.records.length,
+      source: 'cache',
+      sourceLabel: `已售成交價快取（marketplace=${cfg.marketplace}）`,
+      cached: true,
+      engine: 'external',
+    };
+  }
+
+  const scraper = new EbaySoldScraper(cfg, log);
+  log(`  [成交基準] 外部 API（ScrapingDog / SerpApi 輪替 + 容錯切換，抓 ${pages} 頁已售出商品）`);
+  const listings = await scraper.fetchSold(cfg.query, pages);
+
+  cache.set(cfg.query || '', { records: listings, currency: cfg.currency || null, source: 'external' });
+  return {
+    listings,
+    total: listings.length,
+    source: 'external',
+    sourceLabel: `外部 Scraper（已售出，marketplace=${cfg.marketplace}）`,
+    cached: false,
+    engine: 'external',
+  };
+}
+
+module.exports = { collectListings, collectSoldListings, pickScraper };

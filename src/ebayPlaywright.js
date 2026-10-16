@@ -171,11 +171,13 @@ async function scrollToBottom(page) {
  * @param {object} cfg 由 buildConfig() 產生
  * @param {(msg: string) => void} log
  */
-async function scrapeSearch(cfg, log = () => {}) {
+async function scrapeSearch(cfg, log = () => {}, opts = {}) {
   const { chromium } = loadPlaywright();
   const started = Date.now();
   const seen = new Set();
   const listings = [];
+  const pages = Number.isFinite(opts.pages) && opts.pages > 0 ? opts.pages : cfg.pages;
+  const sold = Boolean(opts.sold);
   let browser = null;
   let context = null;
 
@@ -216,14 +218,15 @@ async function scrapeSearch(cfg, log = () => {}) {
       .catch(() => {});
     await sleep(Math.max(cfg.delayMs, 800));
 
-    for (let pageNumber = 1; pageNumber <= cfg.pages; pageNumber += 1) {
+    for (let pageNumber = 1; pageNumber <= pages; pageNumber += 1) {
       const url = buildSearchUrl({
         query: cfg.query,
         marketplace: cfg.marketplace,
         pageNumber,
         buyItNowOnly: cfg.buying !== 'all' && cfg.buying !== 'auction',
+        sold,
       });
-      log(`  [Playwright] 第 ${pageNumber}/${cfg.pages} 頁：${url}`);
+      log(`  [Playwright] 第 ${pageNumber}/${pages} 頁${sold ? '（已售出）' : ''}：${url}`);
 
       let status = 0;
       try {
@@ -278,7 +281,7 @@ async function scrapeSearch(cfg, log = () => {}) {
       log(`  [Playwright] 新增 ${added} 筆（累計 ${listings.length} 筆）`);
 
       if (added === 0) break; // 沒有新東西就不用再翻
-      if (pageNumber < cfg.pages) await sleep(cfg.delayMs);
+      if (pageNumber < pages) await sleep(cfg.delayMs);
     }
   } finally {
     if (context) await context.close().catch(() => {});

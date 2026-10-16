@@ -11,7 +11,7 @@
  *   !help              顯示說明
  *
  * 背景輪詢：依 DISCORD_POLL_INTERVAL_MIN 間隔，對「每個頻道各自」的 _watchlist 關鍵字跑掃描，
- *           發現低於歷史中位價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到「該關鍵字所屬的頻道」。
+ *           發現低於歷史中位成交價的「甜甜價」就推播 Rich Embed + eBay 連結按鈕到「該關鍵字所屬的頻道」。
  *
  * 需在 .env 設定：DISCORD_TOKEN、DISCORD_CHANNEL_ID（必要，可逗號分隔多個頻道）
  *                DISCORD_POLL_INTERVAL_MIN、DISCORD_MIN_DISCOUNT（選填）
@@ -32,7 +32,7 @@ const {
 } = require('discord.js');
 
 const { loadEnv, buildConfig, ROOT } = require('./config');
-const { collectListings } = require('./sources');
+const { collectListings, collectSoldListings } = require('./sources');
 const { summarize, findDeals } = require('./stats');
 const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase } = require('./parse');
 const { formatMoney, formatPct, truncate } = require('./report');
@@ -215,7 +215,7 @@ async function scanFor(keyword, opts = {}) {
   }
 
   // 普卡防呆：查詢關鍵字本身不含限量/簽名訊號（視為普卡）時，
-  // 排除標題含 Auto / Signature / PSA/DNA / PSA Auto 10 / 1/1 / One of One / 低編號 的限量與簽名 listing，
+  // 排除標題含 Auto / Signature / PSA/DNA / PSA Auto 10 / 1/1 / One of One / 低編號 / 平行色 的限量與簽名 listing，
   // 避免把限量卡、簽名卡混入普卡基準價（中位數）而拉高基準。
   if (opts.excludeScarce !== false && queryIsBase(keyword)) {
     const before = kept.length;
@@ -227,12 +227,47 @@ async function scanFor(keyword, opts = {}) {
     baseline: cfg.baseline, trim: cfg.trim, outlierFilter: cfg.outlierFilter, iqrK: cfg.iqrK,
   });
 
+  // 「歷史中位價」應以「已售出成交紀錄」為準，而不是在售掛牌（在售價可隨意亂標）。
+  // 這裡另外抓已售出清單算出成交中位數；抓不到時才降級用「在售中位價」當參考並在 Embed 標示。
+  let soldBaseline = null;
+  let soldUsedCount = 0;
+  if (opts.useSold !== false) {
+    try {
+      const soldCollected = await collectSoldListings(cfg, logFn, 2);
+      const isBase = queryIsBase(keyword);
+      const soldPrices = soldCollected.listings
+        .filter((l) => !targetCurrency || !l.currency || l.currency === targetCurrency)
+        .filter((l) => !matchesAnyKeyword(l.title, cfg.exclude))
+        .filter((l) => !(isBase && titleHasScarcitySignal(l.title)))
+        .map((l) => l.price)
+        .filter((v) => Number.isFinite(v) && v > 0);
+      if (soldPrices.length) {
+        const s = summarize(soldPrices, {
+          baseline: 'median', outlierFilter: cfg.outlierFilter, iqrK: cfg.iqrK,
+        });
+        if (s.usedCount > 0 && s.baseline > 0) {
+          soldBaseline = s.baseline;
+          soldUsedCount = s.usedCount;
+        }
+      }
+      if (soldBaseline == null) logFn('⚠ 找不到可用已售成交價，改用「在售中位價」當參考。');
+    } catch (err) {
+      logFn(`⚠ 抓取已售成交價失敗，改用「在售中位價」當參考：${err.message}`);
+    }
+  }
+
+  const baseline = soldBaseline != null ? soldBaseline : stats.baseline;
+  const baselineKind = soldBaseline != null ? 'sold' : 'active';
+
   const minDiscountPct = typeof opts.minDiscountPct === 'number' ? opts.minDiscountPct : 0;
   const top = typeof opts.top === 'number' ? opts.top : 5;
-  const deals = stats.baseline > 0 ? findDeals(kept, stats, { minDiscountPct, top }) : [];
+  const deals = baseline > 0 ? findDeals(kept, { ...stats, baseline }, { minDiscountPct, top }) : [];
   const cheapest = [...kept].sort((a, b) => a.price - b.price).slice(0, 5);
 
-  return { cfg, collected, targetCurrency, kept, counts, stats, deals, cheapest };
+  return {
+    cfg, collected, targetCurrency, kept, counts, stats, deals, cheapest,
+    baseline, baselineKind, soldUsedCount,
+  };
 }
 
 /** 高稀缺卡片搜尋：多稀缺詞各搜一次 → 合併去重 → 價格區間過濾 → 低於在售中位價過濾 → 依價格最高排序 */
@@ -298,16 +333,17 @@ async function scanRare(keyword, opts = {}) {
 
 /* ── Embed 建構 ────────────────────────────────────────── */
 
-function buildDealEmbed(query, deal, baseline, currency) {
+function buildDealEmbed(query, deal, baseline, currency, opts = {}) {
   const l = deal.listing;
+  const soldBased = opts.baselineKind === 'sold';
   const embed = new EmbedBuilder()
-    .setColor(0x2ecc71)
-    .setTitle('🟢 甜甜價！低於歷史中位價')
+    .setColor(soldBased ? 0x2ecc71 : 0xf1c40f)
+    .setTitle(soldBased ? '🟢 甜甜價！低於歷史中位成交價' : '🟡 甜甜價！低於在售中位價（僅參考）')
     .setDescription(`**${l.title || '（無標題）'}**`)
     .addFields(
       { name: '搜尋關鍵字', value: query || '（未指定）', inline: false },
       { name: '當前價格', value: formatMoney(deal.price, currency), inline: true },
-      { name: '歷史中位價', value: formatMoney(baseline, currency), inline: true },
+      { name: soldBased ? '歷史中位成交價' : '在售中位價（參考）', value: formatMoney(baseline, currency), inline: true },
       { name: '折扣幅度', value: `${formatPct(deal.discountPct)}（省 ${formatMoney(deal.delta, currency)}）`, inline: true },
     )
     .setTimestamp();
@@ -330,7 +366,7 @@ function buildSearchEmbed(query, cheapest, stats, currency, totalCount) {
   const embed = new EmbedBuilder()
     .setColor(0x3498db)
     .setTitle(`🔍 搜尋結果：${query}`)
-    .setDescription(`共 ${totalCount} 筆在售商品；歷史中位價 ${formatMoney(stats.baseline, currency)}（樣本 ${stats.usedCount} 筆）`)
+    .setDescription(`共 ${totalCount} 筆在售商品；在售中位數 ${formatMoney(stats.baseline, currency)}（樣本 ${stats.usedCount} 筆）`)
     .setTimestamp();
 
   if (!cheapest.length) {
@@ -385,7 +421,7 @@ async function handleSearch(message, keyword, client) {
   }
   const loading = await message.reply(`🔎 正在搜尋「${keyword}」…`);
   try {
-    const res = await scanFor(keyword, { top: 5 });
+    const res = await scanFor(keyword, { top: 5, useSold: false });
     if (!res.stats.usedCount || !res.kept.length) {
       await loading.edit(`⚠ 搜尋「${keyword}」沒有可用結果（可能全被黑名單／價格區間／幣別濾掉）。`);
       return;
@@ -393,11 +429,11 @@ async function handleSearch(message, keyword, client) {
     const embed = buildSearchEmbed(keyword, res.cheapest, res.stats, res.targetCurrency, res.kept.length);
     await loading.edit({ content: null, embeds: [embed] });
 
-    // 若搜尋發現低於歷史中位價的甜甜價，即時回覆指令所在的頻道
+    // 若搜尋發現低於在售中位價的甜甜價，即時回覆指令所在的頻道
     if (res.deals.length) {
       const dealsToShow = res.deals.slice(0, 3);
       for (const deal of dealsToShow) {
-        const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
+        const d = buildDealEmbed(keyword, deal, res.baseline, res.targetCurrency, { baselineKind: res.baselineKind });
         await message.channel.send({ embeds: d.embeds, components: d.components });
       }
     }
@@ -529,7 +565,7 @@ async function runPoll(client) {
         for (const deal of fresh.slice(0, MAX_PUSH_PER_QUERY)) {
           const id = deal.listing.itemId || deal.listing.url;
           if (id) alertedIds.add(id);
-          const d = buildDealEmbed(keyword, deal, res.stats.baseline, res.targetCurrency);
+          const d = buildDealEmbed(keyword, deal, res.baseline, res.targetCurrency, { baselineKind: res.baselineKind });
           await channel.send({ embeds: d.embeds, components: d.components });
           log(`  🔔 推播甜甜價至頻道 ${channel.id}：${deal.listing.title}`);
         }

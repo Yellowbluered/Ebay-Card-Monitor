@@ -15,6 +15,7 @@
     "scrape": "node src/index.js --source scrape",
     "scrape:playwright": "node src/index.js --source scrape --engine playwright",
     "scrape:puppeteer": "node src/index.js --source scrape --engine puppeteer",
+    "test": "node --test",
     "install-browser": "npx puppeteer browsers install chrome",
     "install-browser:playwright": "npx playwright install chromium"
   },

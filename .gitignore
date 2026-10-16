@@ -43,3 +43,5 @@ Desktop.ini
 _cli_*.txt
 /English App
 
+sold_cache.json
+sold_cache.json.tmp

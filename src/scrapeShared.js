@@ -38,8 +38,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 組出「在售商品」搜尋頁網址（LH_Sold=0 & LH_Complete=0 保證只要未售出） */
-function buildSearchUrl({ query, marketplace, pageNumber = 1, buyItNowOnly = true, perPage = 240 }) {
+/** 組出搜尋頁網址。sold=true 時切換成「已售出」（LH_Sold=1 & LH_Complete=1），否則只要「在售」。 */
+function buildSearchUrl({ query, marketplace, pageNumber = 1, buyItNowOnly = true, perPage = 240, sold = false }) {
   const domain = domainForMarketplace(marketplace);
   const url = new URL(`https://${domain}/sch/i.html`);
   url.searchParams.set('_nkw', query);
@@ -47,10 +47,16 @@ function buildSearchUrl({ query, marketplace, pageNumber = 1, buyItNowOnly = tru
   url.searchParams.set('_ipg', String(perPage));
   url.searchParams.set('_pgn', String(pageNumber));
   url.searchParams.set('rt', 'nc');
-  // 只取「在售」：不要已完成 / 已售出
-  url.searchParams.set('LH_Complete', '0');
-  url.searchParams.set('LH_Sold', '0');
-  if (buyItNowOnly) url.searchParams.set('LH_BIN', '1');
+  if (sold) {
+    // 只看「已售出」：已完成 + 已售（成交價基準用）
+    url.searchParams.set('LH_Complete', '1');
+    url.searchParams.set('LH_Sold', '1');
+  } else {
+    // 只取「在售」：不要已完成 / 已售出
+    url.searchParams.set('LH_Complete', '0');
+    url.searchParams.set('LH_Sold', '0');
+    if (buyItNowOnly) url.searchParams.set('LH_BIN', '1');
+  }
   return url.toString();
 }
 
