@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { SoldCache } = require('../src/soldCache');
+const { SoldCache, CACHE_FILE } = require('../src/soldCache');
 
 function tmpFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'soldcache-'));
@@ -44,4 +44,26 @@ test('clear(query) 只清指定查詢；clear() 清空全部', () => {
   assert.ok(c.get('B'));
   c.clear();
   assert.strictEqual(c.count(), 0);
+});
+
+test('預設快取路徑位於系統暫存目錄（或 CACHE_DIR）', () => {
+  const base = process.env.CACHE_DIR || os.tmpdir();
+  assert.strictEqual(CACHE_FILE, path.join(base, 'sold_cache.json'));
+});
+
+test('寫入失敗（如 EACCES）不中斷主流程，僅略過快取', () => {
+  const fsMod = require('fs');
+  const origWrite = fsMod.writeFileSync;
+  fsMod.writeFileSync = () => {
+    const err = new Error('EACCES: permission denied, open');
+    err.code = 'EACCES';
+    throw err;
+  };
+  try {
+    const c = new SoldCache(tmpFile(), 7);
+    assert.doesNotThrow(() => c.set('A', { records: [{ title: 'A', price: 1 }] }));
+    assert.strictEqual(c.get('A'), null);
+  } finally {
+    fsMod.writeFileSync = origWrite;
+  }
 });
