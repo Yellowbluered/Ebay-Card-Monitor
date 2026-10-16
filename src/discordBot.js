@@ -5,6 +5,7 @@
  * ---------------------------------------------------------
  * 指令：
  *   !search <關鍵字>   即時搜尋 eBay，回傳最平前 5 筆卡片
+ *   !comp <關鍵字>     查詢歷史成交行情（已售成交中位數 + 統計樣本數 + 最近成交前 5 筆）
  *   !rare <關鍵字>     搜尋高稀缺卡片（自動套用稀缺過濾 + 最高價優先）
  *   !add <關鍵字>      加入「本頻道」的背景輪詢監測清單（寫入 presets.json 的 _watchlist[頻道ID]）
  *   !list              顯示目前監測中的關鍵字
@@ -34,7 +35,7 @@ const {
 const { loadEnv, buildConfig, ROOT } = require('./config');
 const { collectListings, collectSoldListings } = require('./sources');
 const { summarize, findDeals } = require('./stats');
-const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase } = require('./parse');
+const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase, normalizeKeyword } = require('./parse');
 const { formatMoney, formatPct, truncate } = require('./report');
 
 const PRESETS_FILE = path.join(ROOT, 'presets.json');
@@ -148,6 +149,29 @@ function splitKeywordAndRange(arg) {
   return { keyword: tokens.join(' '), range: null };
 }
 
+/** 已售成交日期解析（支援 "Oct 12, 2024" / "12 Oct 2024" / "2024-10-12" / "10/12/2024"）→ epoch ms，無法解析回 null */
+const MONTH_INDEX = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+function parseSoldDate(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  let m = s.match(/^([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/i);
+  if (m) {
+    const mon = MONTH_INDEX[m[1].slice(0, 3).toLowerCase()];
+    if (mon) return Date.UTC(Number(m[3]), mon - 1, Number(m[2]));
+  }
+  m = s.match(/^(\d{1,2})\s+([a-z]{3,9})\.?\s+(\d{4})$/i);
+  if (m) {
+    const mon = MONTH_INDEX[m[2].slice(0, 3).toLowerCase()];
+    if (mon) return Date.UTC(Number(m[3]), mon - 1, Number(m[1]));
+  }
+  m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return Date.UTC(Number(m[3]), Number(m[1]) - 1, Number(m[2]));
+  return null;
+}
+
 /* ── presets.json 監測清單 ─────────────────────────────── */
 
 function loadPresets() {
@@ -168,7 +192,7 @@ function readWatchlist() {
   const out = {};
   for (const [channelId, arr] of Object.entries(raw)) {
     if (Array.isArray(arr)) {
-      const list = arr.map((s) => String(s).trim()).filter(Boolean);
+      const list = arr.map((s) => normalizeKeyword(String(s).trim())).filter(Boolean);
       if (list.length) out[channelId] = list;
     }
   }
@@ -186,7 +210,7 @@ function addWatchKeyword(channelId, keyword) {
   const raw = presets[WATCH_KEY];
   const map = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
   const list = Array.isArray(map[channelId]) ? map[channelId] : [];
-  const normalized = String(keyword).trim();
+  const normalized = normalizeKeyword(String(keyword).trim());
   const exists = list.includes(normalized);
   if (!exists) {
     list.push(normalized);
@@ -331,6 +355,49 @@ async function scanRare(keyword, opts = {}) {
   return { cfg, targetCurrency, kept, counts, rare, query: base, averagePrice, priceRange };
 }
 
+/** 歷史成交行情：抓已售成交紀錄 → 嚴格排除（Auto / 1/1 / 低編號 / 平行 / 黑名單 / 幣別）→ IQR 中位數 + 最近成交前 5 筆 */
+async function scanComp(keyword, opts = {}) {
+  const logFn = opts.log || (() => {});
+  const normalized = normalizeKeyword(keyword);
+  const cfg = buildConfig(['--limit', '100', '--pages', '1', '--baseline', 'median', normalized]);
+  const pages = Math.max(1, Number(opts.pages) || numEnv('SOLD_PAGES', 2));
+
+  const soldCollected = await collectSoldListings(cfg, logFn, pages);
+  const listings = soldCollected.listings || [];
+  let targetCurrency = cfg.currency || dominantCurrency(listings, null);
+
+  // 嚴格排除：幣別、黑名單（reprint/proxy/digital/custom art）、稀缺訊號（Auto / 1/1 / 低編號 / 平行色）。
+  const kept = listings.filter((l) => {
+    if (targetCurrency && l.currency && l.currency !== targetCurrency) return false;
+    if (matchesAnyKeyword(l.title, cfg.exclude)) return false;
+    if (titleHasScarcitySignal(l.title)) return false;
+    return Number.isFinite(l.price) && l.price > 0;
+  });
+
+  const stats = summarize(kept.map((l) => l.price), {
+    baseline: 'median', outlierFilter: cfg.outlierFilter, iqrK: cfg.iqrK,
+  });
+
+  // 最近成交：依成交日期降冪（無法解析日期的排最後），取前 5 筆。
+  const recent = kept
+    .slice()
+    .sort((a, b) => (parseSoldDate(b.soldDate) || 0) - (parseSoldDate(a.soldDate) || 0))
+    .slice(0, 5);
+
+  return {
+    cfg,
+    keyword: normalized,
+    targetCurrency,
+    total: listings.length,
+    median: stats.baseline,
+    usedCount: stats.usedCount,
+    removed: stats.removed,
+    recent,
+    cached: Boolean(soldCollected.cached),
+    sourceLabel: soldCollected.sourceLabel,
+  };
+}
+
 /* ── Embed 建構 ────────────────────────────────────────── */
 
 function buildDealEmbed(query, deal, baseline, currency, opts = {}) {
@@ -412,6 +479,36 @@ function buildRareEmbed(keyword, rare, currency, totalCount, info = {}) {
   return embed;
 }
 
+/** 歷史成交行情 Embed（綠色）：歷史成交中位數、統計樣本數、最近成交前 5 筆記錄與價格 */
+function buildCompEmbed(keyword, res) {
+  const currency = res.targetCurrency || 'USD';
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`📊 歷史成交行情：${keyword}`)
+    .setTimestamp();
+
+  if (!res.usedCount || !res.recent.length) {
+    embed.setDescription(`找不到符合條件的已售成交記錄（共抓取 ${res.total} 筆，可能全被排除詞／幣別／稀缺訊號濾掉）。`);
+    return embed;
+  }
+
+  embed.addFields(
+    { name: '歷史成交中位數', value: formatMoney(res.median, currency), inline: true },
+    { name: '統計樣本數', value: `${res.usedCount} 筆${res.removed ? `（剔除離群值 ${res.removed} 筆）` : ''}`, inline: true },
+  );
+
+  const lines = res.recent.map((l, i) => {
+    const title = truncate(l.title || '（無標題）', 60);
+    const date = l.soldDate ? ` ・ ${l.soldDate}` : '';
+    return `${i + 1}. **${formatMoney(l.price, currency)}** — ${l.url ? `[${title}](${l.url})` : title}${date}`;
+  });
+  embed.addFields({ name: `最近成交前 ${res.recent.length} 筆`, value: lines.join('\n') });
+
+  if (res.cached) embed.setFooter({ text: '資料來源：7 天成交價快取' });
+  else if (res.sourceLabel) embed.setFooter({ text: `資料來源：${res.sourceLabel}` });
+  return embed;
+}
+
 /* ── 指令處理 ──────────────────────────────────────────── */
 
 async function handleSearch(message, keyword, client) {
@@ -477,6 +574,22 @@ async function handleRare(message, arg) {
   }
 }
 
+async function handleComp(message, arg) {
+  const keyword = normalizeKeyword(arg);
+  if (!keyword) {
+    await message.reply('用法：`!comp <關鍵字>`，例：`!comp charizard psa10`（評級詞會自動補空格）');
+    return;
+  }
+  const loading = await message.reply(`📊 正在查詢「${keyword}」的歷史成交行情…`);
+  try {
+    const res = await scanComp(keyword, { log });
+    const embed = buildCompEmbed(keyword, res);
+    await loading.edit({ content: null, embeds: [embed] });
+  } catch (err) {
+    await loading.edit(`❌ 查詢失敗：${err.message}`).catch(() => {});
+  }
+}
+
 function formatWatchSummary(list) {
   const shown = list.slice(0, MAX_LIST_LINES);
   const lines = shown.map((k, i) => `${i + 1}. ${k}`);
@@ -513,6 +626,7 @@ async function handleHelp(message) {
   await message.reply([
     '**eBay 卡價監測 Bot 指令**',
     '`!search <關鍵字>` — 即時搜尋 eBay，回傳最平前 5 筆卡片',
+    '`!comp <關鍵字>` — 查詢歷史成交行情（已售成交中位數 + 統計樣本數 + 最近成交前 5 筆）',
     '`!rare <關鍵字> [價格範圍]` — 搜尋 /99 以下高稀缺卡片，且低於在售中位價；範圍可用 100-500 / 500+ / -500 或 cheap/mid/high/premium',
     '`!add <關鍵字>` — 把關鍵字加入「本頻道」的背景輪詢監測清單（寫入 presets.json）',
     '`!list` — 顯示目前監測中的關鍵字清單',
@@ -525,9 +639,10 @@ async function handleCommand(message, client) {
   if (!message.content || !message.content.startsWith('!')) return;
   const [rawCmd, ...rest] = message.content.slice(1).trim().split(/\s+/);
   const cmd = (rawCmd || '').toLowerCase();
-  const arg = rest.join(' ').trim();
+  const arg = normalizeKeyword(rest.join(' ').trim());
 
   if (cmd === 'search') return handleSearch(message, arg, client);
+  if (cmd === 'comp') return handleComp(message, arg);
   if (cmd === 'rare') return handleRare(message, arg);
   if (cmd === 'add') return handleAdd(message, arg);
   if (cmd === 'list') return handleList(message);
@@ -715,15 +830,18 @@ if (require.main === module) {
 module.exports = {
   scanFor,
   scanRare,
+  scanComp,
   readWatchlist,
   addWatchKeyword,
   loadPresets,
   buildDealEmbed,
   buildSearchEmbed,
   buildRareEmbed,
+  buildCompEmbed,
   pushDealsToAlertChannel,
   parsePriceRange,
   splitKeywordAndRange,
+  parseSoldDate,
   applyFilters,
   dominantCurrency,
 };

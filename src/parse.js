@@ -249,6 +249,44 @@ function queryIsBase(query) {
   return !titleHasScarcitySignal(positive);
 }
 
+/* ── 關鍵字正規化（防呆） ───────────────────────────────── */
+
+/** 評級機構別名 → 正規化大寫（對齊 Python 版 GRADING_COMPANIES） */
+const GRADING_COMPANIES = {
+  psa: 'PSA',
+  bgs: 'BGS',
+  beckett: 'BGS',
+  cgc: 'CGC',
+  sgc: 'SGC',
+  csg: 'CSG',
+  ksa: 'KSA',
+};
+
+/** 連寫評級詞（psa10、bgs9.5、cgc10 …）→ 分開 + 大寫（PSA 10、BGS 9.5、CGC 10 …） */
+const GRADING_CONCAT_RE = /\b(psa|bgs|beckett|cgc|sgc|csg|ksa)(\d+(?:\.\d+)?)(?![.\d])/gi;
+
+/** 連寫卡號（js1、rc1、op01 …）→ 帶連字號標準格式（JS-1、RC-1、OP-01 …）；單字母前綴（如 f1）不處理以免誤傷搜尋詞 */
+const CARD_NUMBER_RE = /\b([a-z]{2,4})(\d{1,4})\b(?!-)/gi;
+
+/**
+ * 關鍵字自動正規化（防呆），在送給 eBay / 外部 API 前先跑：
+ *   1. 評級詞補空格：psa10 → PSA 10、psa9 → PSA 9、bgs9.5 → BGS 9.5、cgc10 → CGC 10。
+ *   2. 卡號標準化：js1 / rc1 等連寫卡號 → JS-1 / RC-1（eBay 搜尋不區分大小寫）。
+ *   3. 收斂多餘空白。
+ * 此函式冪等（重複套用結果不變）。
+ */
+function normalizeKeyword(input) {
+  if (input === null || input === undefined) return '';
+  let text = String(input).replace(/\u00a0/g, ' ').trim();
+  if (!text) return '';
+  text = text.replace(GRADING_CONCAT_RE, (match, co, grade) => {
+    const canon = GRADING_COMPANIES[String(co).toLowerCase()] || String(co).toUpperCase();
+    return `${canon} ${grade}`;
+  });
+  text = text.replace(CARD_NUMBER_RE, (match, letters, digits) => `${String(letters).toUpperCase()}-${digits}`);
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 module.exports = {
   CURRENCY_SYMBOLS,
   MARKETPLACE_DOMAINS,
@@ -264,4 +302,6 @@ module.exports = {
   matchesAnyKeyword,
   titleHasScarcitySignal,
   queryIsBase,
+  normalizeKeyword,
+  GRADING_COMPANIES,
 };
