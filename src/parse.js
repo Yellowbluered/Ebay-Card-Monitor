@@ -186,6 +186,53 @@ function matchesAnyKeyword(title, keywords) {
   return keywords.some((k) => haystack.includes(k));
 }
 
+/* ── 非卡牌 / 散卡自選清單「硬黑名單」（一律攔截，不予推播） ──── */
+
+/**
+ * 散卡 / 自選下拉清單（Choose your card）訊號。
+ * 這類標題的直買價通常只是選單底價（例如 $0.99），
+ * 若拿整套或熱門稀有卡的中位價來比對，就會產生「假筍盤」。
+ * 多字片語採 substring 比對（不分大小寫）。
+ */
+const NON_CARD_PHRASES = [
+  'choose your',
+  'pick your',
+  'complete your set',
+  'you pick',
+  'cards to choose',
+  'pick a card',
+  // 實體周邊 / 非卡牌
+  '8x10',
+  'tennis photo',
+  'signed photo',
+];
+
+/**
+ * 實體周邊 / 非卡牌「單字」訊號，以完整單字（token）比對，
+ * 避免 substring 誤傷（例如「ball」不應命中「basketball」）。
+ */
+const NON_CARD_WORDS = new Set([
+  'photo', 'photos',
+  'picture', 'pictures',
+  'poster', 'posters',
+  'magazine', 'magazines',
+  'puck', 'pucks',
+  'ball', 'balls',
+]);
+
+/**
+ * 標題（或在售清單）是否為非卡牌 / 散卡自選清單。
+ * 命中即應一律攔截、不予推播（硬過濾，與可設定的 --exclude 無關）。
+ */
+function hasNonCardSignal(title) {
+  if (!title) return false;
+  const lower = String(title).toLowerCase();
+  if (!lower) return false;
+  if (NON_CARD_PHRASES.some((p) => lower.includes(p))) return true;
+  const tokens = lower.match(/[a-z0-9'/]+/g) || [];
+  return tokens.some((t) => NON_CARD_WORDS.has(t));
+}
+
 /** 簽名標記（含 Signature / Signed / Sign / Sig、PSA/DNA 認證等變體） */
 const AUTO_MARKERS = ['auto', 'autograph', 'autographed', "auto'd", 'signature', 'signed', 'sign', 'sig', 'dna', 'psa/dna'];
 
@@ -300,6 +347,9 @@ module.exports = {
   cleanItemUrl,
   toKeywordList,
   matchesAnyKeyword,
+  hasNonCardSignal,
+  NON_CARD_PHRASES,
+  NON_CARD_WORDS,
   titleHasScarcitySignal,
   queryIsBase,
   normalizeKeyword,

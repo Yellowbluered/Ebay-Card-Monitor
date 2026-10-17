@@ -35,7 +35,7 @@ const {
 const { loadEnv, buildConfig, ROOT } = require('./config');
 const { collectListings, collectSoldListings } = require('./sources');
 const { summarize, findDeals } = require('./stats');
-const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase, normalizeKeyword } = require('./parse');
+const { matchesAnyKeyword, titleHasScarcitySignal, queryIsBase, normalizeKeyword, hasNonCardSignal } = require('./parse');
 const { formatMoney, formatPct, truncate } = require('./report');
 
 const PRESETS_FILE = path.join(ROOT, 'presets.json');
@@ -106,12 +106,13 @@ function dominantCurrency(listings, fallback) {
 }
 
 function applyFilters(listings, cfg, targetCurrency) {
-  const counts = { otherCurrencies: 0, excludedByTitle: 0, excludedByPrice: 0 };
+  const counts = { otherCurrencies: 0, excludedByTitle: 0, excludedByPrice: 0, excludedNonCard: 0 };
   const kept = [];
   for (const listing of listings) {
     if (targetCurrency && listing.currency && listing.currency !== targetCurrency) {
       counts.otherCurrencies += 1; continue;
     }
+    if (hasNonCardSignal(listing.title)) { counts.excludedNonCard += 1; continue; }
     if (matchesAnyKeyword(listing.title, cfg.exclude)) { counts.excludedByTitle += 1; continue; }
     if (cfg.minPrice != null && listing.price < cfg.minPrice) { counts.excludedByPrice += 1; continue; }
     if (cfg.maxPrice != null && listing.price > cfg.maxPrice) { counts.excludedByPrice += 1; continue; }
@@ -261,6 +262,7 @@ async function scanFor(keyword, opts = {}) {
       const isBase = queryIsBase(keyword);
       const soldPrices = soldCollected.listings
         .filter((l) => !targetCurrency || !l.currency || l.currency === targetCurrency)
+        .filter((l) => !hasNonCardSignal(l.title))
         .filter((l) => !matchesAnyKeyword(l.title, cfg.exclude))
         .filter((l) => !(isBase && titleHasScarcitySignal(l.title)))
         .map((l) => l.price)
@@ -366,9 +368,10 @@ async function scanComp(keyword, opts = {}) {
   const listings = soldCollected.listings || [];
   let targetCurrency = cfg.currency || dominantCurrency(listings, null);
 
-  // 嚴格排除：幣別、黑名單（reprint/proxy/digital/custom art）、稀缺訊號（Auto / 1/1 / 低編號 / 平行色）。
+  // 嚴格排除：幣別、非卡牌/散卡、黑名單（reprint/proxy/digital/custom art）、稀缺訊號（Auto / 1/1 / 低編號 / 平行色）。
   const kept = listings.filter((l) => {
     if (targetCurrency && l.currency && l.currency !== targetCurrency) return false;
+    if (hasNonCardSignal(l.title)) return false;
     if (matchesAnyKeyword(l.title, cfg.exclude)) return false;
     if (titleHasScarcitySignal(l.title)) return false;
     return Number.isFinite(l.price) && l.price > 0;

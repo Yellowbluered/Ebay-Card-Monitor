@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { titleHasScarcitySignal, queryIsBase } = require('../src/parse');
+const { titleHasScarcitySignal, queryIsBase, hasNonCardSignal } = require('../src/parse');
 
 test('普卡標題不視為稀缺', () => {
   assert.strictEqual(titleHasScarcitySignal('2024 Panini Instant Jannik Sinner PSA 10'), false);
@@ -56,4 +56,45 @@ test('queryIsBase 正確判斷普卡/限量查詢', () => {
   assert.strictEqual(queryIsBase('"jannik sinner" "panini instant" "psa 10" -auto -patch -/10 -/25'), true);
   assert.strictEqual(queryIsBase('jannik sinner gold psa 10'), false);
   assert.strictEqual(queryIsBase('jannik sinner auto psa 10'), false);
+});
+
+test('散卡自選下拉清單會被攔截', () => {
+  const titles = [
+    'Choose Your Card Marvel PMG Red Spider-Man',
+    'Pick Your Card - 2024 Topps Chrome Max Verstappen',
+    'Complete Your Set - 1990 Marvel Masterpieces',
+    'You Pick 1 Card From The Set',
+    'Cards To Choose From',
+    'Pick A Card',
+  ];
+  for (const t of titles) {
+    assert.strictEqual(hasNonCardSignal(t), true, t);
+  }
+});
+
+test('實體周邊與非卡牌會被攔截', () => {
+  const titles = [
+    '8x10 Signed Photo Jannik Sinner',
+    'Roger Federer Signed Photo',
+    'Tennis Photo Novak Djokovic',
+    'Picture / Poster Magazine',
+    'Autographed Hockey Puck',
+    'Game Used Ball',
+    'Marvel Masterpieces Poster',
+  ];
+  for (const t of titles) {
+    assert.strictEqual(hasNonCardSignal(t), true, t);
+  }
+});
+
+test('正常卡牌標題不視為非卡牌', () => {
+  const titles = [
+    '2024 Panini Instant Jannik Sinner PSA 10',
+    '2024 Topps Chrome Max Verstappen Card',
+    '1995 Marvel Masterpieces Spider-Man PMG Red',
+    '2023 Topps Chrome Lewis Hamilton Card',
+  ];
+  for (const t of titles) {
+    assert.strictEqual(hasNonCardSignal(t), false, t);
+  }
 });
